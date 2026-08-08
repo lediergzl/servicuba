@@ -3,7 +3,7 @@
 // ============================================================
 import {
     apiFetch, notify, showFormModal, showConfirm, escapeHtml,
-    getGeolocation, geolocationErrorMessage
+    getGeolocation, geolocationErrorMessage, ensureUiRoot
 } from './core.js';
 import { openChatForTask } from './chat.js';
 import { requestFeatureTask } from './monetization.js';
@@ -14,6 +14,15 @@ let nearbyTasksAbortController = null;
 // Categorías cargadas por loadCategories(); se reutilizan para construir
 // el selector de "Nueva tarea" sin volver a pedirlas al backend.
 let loadedCategories = [];
+
+// IDs de tareas a las que YA se postuló en esta sesión (del lado
+// trabajador). apply_to_task no cambia el estado de la tarea (sigue
+// "activa" hasta que el cliente acepte a alguien), así que al recargar
+// la lista la tarjeta se veía idéntica y parecía que el clic no había
+// hecho nada. Se usa esto para mostrar "Ya postulado" en vez de
+// "Postular" sin tener que exponer un endpoint nuevo de "mis
+// postulaciones" para esto.
+const appliedTaskIds = new Set();
 
 // ---------- Categorías ----------
 
@@ -116,6 +125,7 @@ function renderNearbyTasks(tasks) {
     }
 
     tasks.forEach(t => {
+        const yaPostulado = appliedTaskIds.has(String(t.id));
         const card = document.createElement('div');
         card.className = t.destacada ? 'task-card task-card--featured' : 'task-card';
         card.innerHTML = `
@@ -126,9 +136,10 @@ function renderNearbyTasks(tasks) {
             <p class="task-card__meta">
                 <span class="chip">${escapeHtml(String(t.distancia_km))} km</span>
                 <span class="chip chip--estado-${escapeHtml(t.estado)}">${escapeHtml(t.estado)}</span>
+                ${yaPostulado ? '<span class="chip chip--estado-asignada">Ya postulado</span>' : ''}
             </p>
-            <button class="btn btn-primary btn-block" data-id="${escapeHtml(String(t.id))}">
-                Postular
+            <button class="btn ${yaPostulado ? 'btn-secondary' : 'btn-primary'} btn-block" data-id="${escapeHtml(String(t.id))}" ${yaPostulado ? 'disabled' : ''}>
+                ${yaPostulado ? 'Postulación enviada ✓' : 'Postular'}
             </button>
         `;
         container.appendChild(card);
@@ -143,7 +154,7 @@ function setupTaskListDelegation() {
 
     container.addEventListener('click', (e) => {
         const btn = e.target.closest('button[data-id]');
-        if (!btn) return;
+        if (!btn || btn.disabled) return;
         applyToTask(btn.dataset.id, btn);
     });
 }
@@ -180,6 +191,7 @@ async function applyToTask(taskId, buttonEl) {
             method: 'POST',
             body: JSON.stringify({ mensaje: result.mensaje || '' })
         });
+        appliedTaskIds.add(String(taskId));
         notify('Postulación enviada correctamente.', 'success');
         await loadNearbyTasks();
     } catch (err) {
@@ -251,6 +263,7 @@ async function loadMyTasks() {
         const canChat = t.estado === 'asignada' || t.estado === 'en_proceso' || t.estado === 'completada';
         const canComplete = t.estado === 'asignada' || t.estado === 'en_proceso';
         const canFeature = t.estado === 'activa' && !t.destacada;
+        const canViewApplications = t.estado === 'activa';
 
         card.innerHTML = `
             <div class="task-card__row">
@@ -262,6 +275,7 @@ async function loadMyTasks() {
                 ${t.destacada ? '<span class="chip" style="color:var(--copper);border-color:var(--copper)">★ Destacada</span>' : ''}
             </p>
             <div class="task-card__actions">
+                ${canViewApplications ? `<button class="btn btn-accent btn-sm" data-action="applications" data-id="${t.id}">Ver postulaciones</button>` : ''}
                 ${canChat ? `<button class="btn btn-secondary btn-sm" data-action="chat" data-id="${t.id}">
                     <svg class="icon" viewBox="0 0 24 24"><path d="M4 5h16v11H9l-4 4V5Z"/></svg>
                     Chat
@@ -283,6 +297,9 @@ async function loadMyTasks() {
                 openChatForTask(taskId);
             } else if (btn.dataset.action === 'feature') {
                 await requestFeatureTask(taskId);
+            } else if (btn.dataset.action === 'applications') {
+                const titulo = btn.closest('.task-card')?.querySelector('.task-card__title')?.textContent || '';
+                await viewApplications(taskId, titulo);
             } else if (btn.dataset.action === 'complete') {
                 const ok = await showConfirm({
                     title: 'Marcar tarea como completada',
@@ -300,6 +317,95 @@ async function loadMyTasks() {
             }
         });
     }
+}
+
+// ---------- Ver / aceptar postulaciones (cliente) ----------
+
+async function viewApplications(taskId, tituloTarea) {
+    let apps;
+    try {
+        apps = await apiFetch(`/applications/task/${encodeURIComponent(taskId)}`);
+    } catch (err) {
+        notify(`Error: ${err.message}`, 'error');
+        return;
+    }
+
+    if (!apps.length) {
+        notify('Todavía no tienes postulaciones para esta tarea.', 'info');
+        return;
+    }
+
+    ensureUiRoot();
+    const overlay = document.createElement('div');
+    overlay.className = 'modal-overlay';
+
+    const modal = document.createElement('div');
+    modal.className = 'modal-card';
+
+    const heading = document.createElement('h2');
+    heading.className = 'modal-title';
+    heading.textContent = tituloTarea ? `Postulaciones — ${tituloTarea}` : 'Postulaciones';
+    modal.appendChild(heading);
+
+    const list = document.createElement('div');
+    list.className = 'stack-sm';
+    apps.forEach(app => {
+        const row = document.createElement('div');
+        row.className = 'admin-row';
+        row.dataset.appId = app.id;
+        row.innerHTML = `
+            <div class="admin-row__top">
+                <span class="admin-row__type">${escapeHtml(app.worker_nombre)}${app.worker_verificado ? ' ✓' : ''}</span>
+                <span class="chip">★ ${(app.worker_rating ?? 0).toFixed(1)}</span>
+            </div>
+            ${app.mensaje ? `<p class="admin-row__meta">${escapeHtml(app.mensaje)}</p>` : '<p class="admin-row__meta">Sin mensaje adicional.</p>'}
+            <div class="admin-row__actions">
+                <button class="btn btn-primary btn-sm" data-action="accept" data-app-id="${app.id}">Aceptar</button>
+            </div>
+        `;
+        list.appendChild(row);
+    });
+    modal.appendChild(list);
+
+    const actions = document.createElement('div');
+    actions.className = 'modal-actions';
+    const closeBtn = document.createElement('button');
+    closeBtn.type = 'button';
+    closeBtn.className = 'btn btn-ghost';
+    closeBtn.textContent = 'Cerrar';
+    actions.appendChild(closeBtn);
+    modal.appendChild(actions);
+
+    overlay.appendChild(modal);
+    document.body.appendChild(overlay);
+
+    function close() { overlay.remove(); }
+    closeBtn.addEventListener('click', close);
+    overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
+
+    list.addEventListener('click', async (e) => {
+        const btn = e.target.closest('button[data-action="accept"]');
+        if (!btn) return;
+        const ok = await showConfirm({
+            title: 'Aceptar a este trabajador',
+            message: 'Se asignará la tarea y podrán coordinar por chat. Las demás postulaciones seguirán pendientes pero la tarea dejará de estar disponible.',
+            confirmLabel: 'Sí, aceptar'
+        });
+        if (!ok) return;
+
+        btn.disabled = true;
+        btn.textContent = 'Aceptando…';
+        try {
+            await apiFetch(`/applications/${encodeURIComponent(btn.dataset.appId)}/accept`, { method: 'POST' });
+            notify('Trabajador aceptado. Ya pueden coordinar por chat.', 'success');
+            close();
+            await loadMyTasks();
+        } catch (err) {
+            notify(`Error: ${err.message}`, 'error');
+            btn.disabled = false;
+            btn.textContent = 'Aceptar';
+        }
+    });
 }
 
 // ---------- Crear tarea ----------
