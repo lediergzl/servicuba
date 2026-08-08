@@ -69,6 +69,18 @@ export async function loadNearbyTasks() {
     const container = document.getElementById('listaTareas');
     if (container) container.innerHTML = renderSkeletonCards(3);
 
+    // Trae las postulaciones reales del trabajador para que "Ya postulado"
+    // sobreviva a un refresh de página (antes sólo vivía en el Set en
+    // memoria, así que tras recargar el botón volvía a mostrar "Postular"
+    // para tareas ya postuladas y el backend rechazaba el reintento con 400).
+    try {
+        const mine = await apiFetch('/applications/mine');
+        mine.forEach(id => appliedTaskIds.add(String(id)));
+    } catch {
+        // fallo silencioso: en el peor caso el botón no se marca como
+        // "ya postulado" hasta que el usuario intente de nuevo.
+    }
+
     let pos;
     try {
         pos = await getGeolocation();
@@ -196,6 +208,15 @@ async function applyToTask(taskId, buttonEl) {
         await loadNearbyTasks();
     } catch (err) {
         notify(`Error: ${err.message}`, 'error');
+        if (err.message === 'Ya te has postulado a esta tarea') {
+            // El backend tiene razón y nuestro estado local estaba
+            // desactualizado (p.ej. otra pestaña, o un caché de
+            // /applications/mine viejo) — lo corregimos en vez de dejar
+            // el botón en "Enviando…" para siempre.
+            appliedTaskIds.add(String(taskId));
+            await loadNearbyTasks();
+            return;
+        }
         if (buttonEl) {
             buttonEl.disabled = false;
             buttonEl.textContent = 'Postular';
