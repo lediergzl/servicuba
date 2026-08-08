@@ -261,6 +261,13 @@ export function switchView(viewId) {
     });
 }
 
+// Última lista de "mis tareas" cargada — el listener delegado de
+// #misTareas se registra una sola vez (ver dataset.delegated más abajo),
+// así que si leyera el array `tasks` por closure quedaría atado a la
+// PRIMERA carga para siempre. Se guarda aquí y se refresca en cada
+// loadMyTasks() para que el listener siempre vea los datos actuales.
+let myTasksCache = [];
+
 const ESTADO_LABELS = {
     activa: 'Buscando trabajador',
     asignada: 'Asignada — coordina por chat',
@@ -286,6 +293,7 @@ async function loadMyTasks() {
 
     if (!container) return;
     container.innerHTML = '';
+    myTasksCache = tasks;
 
     if (!tasks.length) {
         container.innerHTML = '<p class="empty-state">Todavía no tienes tareas publicadas. Toca "+ Nueva tarea" para empezar.</p>';
@@ -330,7 +338,8 @@ async function loadMyTasks() {
             if (!btn) return;
             const taskId = btn.dataset.id;
             if (btn.dataset.action === 'chat') {
-                openChatForTask(taskId);
+                const t = myTasksCache.find(tt => String(tt.id) === String(taskId));
+                openChatForTask(taskId, t?.titulo || '', t?.trabajador_nombre || 'Trabajador');
             } else if (btn.dataset.action === 'feature') {
                 await requestFeatureTask(taskId);
             } else if (btn.dataset.action === 'applications') {

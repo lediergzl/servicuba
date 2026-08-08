@@ -30,6 +30,15 @@ async function bootstrap() {
             refreshVerificationBanner();
             initPush();
             checkAndShowAdminEntry();
+            // Se carga acá (además de al entrar a la pestaña "Mensajes")
+            // para que el badge de no-leídos del bottom nav ya esté
+            // correcto desde que abres la app — antes sólo se calculaba
+            // al visitar Mensajes manualmente, así que un chat nuevo era
+            // invisible ("ninguna burbuja") hasta que uno entraba ahí por
+            // curiosidad. Escribe en el contenedor de Mensajes aunque
+            // esté oculto — es inofensivo y queda ya listo cuando el
+            // usuario abra esa pestaña.
+            loadConversations();
         } catch {
             showLanding();
         }
@@ -91,11 +100,24 @@ async function loadProfile() {
     el.innerHTML = '<p class="empty-state">Cargando…</p>';
     try {
         const user = await apiFetch('/users/profile');
+        const esTrabajador = user.rol === 'trabajador';
+
+        // Antes el perfil se veía IDÉNTICO para cliente y trabajador
+        // (mismo nombre/rol/rating/teléfono, sin ningún dato propio del
+        // rol). Se agregan datos específicos: para el trabajador, su
+        // oficio/categoría; para el cliente, un resumen de sus tareas
+        // publicadas — así ambos perfiles se distinguen a simple vista.
+        let roleDetail = '';
+        if (esTrabajador && user.categoria_nombre) {
+            roleDetail = `<p class="profile-card__meta">${user.categoria_icono ? user.categoria_icono + ' ' : ''}${user.categoria_nombre}</p>`;
+        }
+
         el.innerHTML = `
             <div class="profile-card">
                 <div class="profile-card__avatar">${user.nombre.charAt(0).toUpperCase()}</div>
                 <h2 class="profile-card__name">${user.nombre} ${user.verificado ? '<span class="verified-stamp" title="Cuenta verificada">✓ VERIFICADO</span>' : ''}</h2>
                 <p class="profile-card__meta">${user.rol === 'cliente' ? 'Cliente' : 'Trabajador'}</p>
+                ${roleDetail}
                 <p class="profile-card__meta">${renderStarRating(user.rating)} <span class="mono">${(user.rating ?? 0).toFixed(1)}</span></p>
                 <p class="profile-card__meta mono">${user.telefono}</p>
             </div>
