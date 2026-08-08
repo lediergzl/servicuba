@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 from datetime import datetime
-from geoalchemy2.functions import ST_DWithin, ST_Distance, ST_SetSRID, ST_MakePoint
+from geoalchemy2.functions import ST_DWithin, ST_Distance, ST_SetSRID, ST_MakePoint, ST_X, ST_Y
 from ..database import get_db
 from ..models.task import Task, TaskStatus
 from ..models.user import User
@@ -60,7 +60,9 @@ def get_nearby_tasks(
     now = datetime.utcnow()
     query = db.query(
         Task,
-        ST_Distance(Task.ubicacion, point).label("distance")
+        ST_Distance(Task.ubicacion, point).label("distance"),
+        ST_Y(Task.ubicacion).label("task_lat"),
+        ST_X(Task.ubicacion).label("task_lng"),
     ).filter(
         Task.estado == TaskStatus.ACTIVA,
         ST_DWithin(Task.ubicacion, point, radius_m)
@@ -72,7 +74,7 @@ def get_nearby_tasks(
     destacada_activa = (Task.destacada == True) & (Task.destacada_hasta > now)  # noqa: E712
     results = query.order_by(destacada_activa.desc(), "distance").limit(50).all()
     tasks = []
-    for task, dist in results:
+    for task, dist, task_lat, task_lng in results:
         tasks.append({
             "id": task.id,
             "titulo": task.titulo,
@@ -81,7 +83,9 @@ def get_nearby_tasks(
             "categoria_id": task.categoria_id,
             "estado": task.estado.value,
             "destacada": bool(task.destacada and task.destacada_hasta and task.destacada_hasta > now),
-            "created_at": task.created_at
+            "created_at": task.created_at,
+            "lat": task_lat,
+            "lng": task_lng,
         })
     return tasks
 
