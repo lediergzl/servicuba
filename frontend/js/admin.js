@@ -1,0 +1,165 @@
+// ============================================================
+// Panel de administración: pagos pendientes + anuncios
+// ============================================================
+import { apiFetch, notify, showConfirm, escapeHtml } from './core.js';
+
+const TIPO_LABELS = {
+    suscripcion_trabajador: 'Suscripción premium',
+    tarea_destacada: 'Destacar tarea',
+    anuncio: 'Anuncio de marca',
+};
+
+function formatDate(iso) {
+    if (!iso) return '';
+    return new Date(iso).toLocaleString('es-CU', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
+}
+
+export async function checkAndShowAdminEntry() {
+    const btn = document.getElementById('adminPanelBtn');
+    if (!btn) return;
+    try {
+        const user = await apiFetch('/users/profile');
+        btn.classList.toggle('hidden', !user.es_admin);
+    } catch {
+        btn.classList.add('hidden');
+    }
+}
+
+export async function loadPendingPayments() {
+    const container = document.getElementById('adminPagos');
+    if (!container) return;
+    container.innerHTML = '<p class="empty-state">Cargando…</p>';
+
+    let payments;
+    try {
+        payments = await apiFetch('/payments/pending');
+    } catch (err) {
+        container.innerHTML = `<p class="empty-state">Error: ${escapeHtml(err.message)}</p>`;
+        return;
+    }
+
+    if (!payments.length) {
+        container.innerHTML = '<p class="empty-state">No hay pagos pendientes.</p>';
+        return;
+    }
+
+    container.innerHTML = payments.map(p => `
+        <div class="admin-row" data-payment-id="${p.id}">
+            <div class="admin-row__top">
+                <span class="admin-row__type">${escapeHtml(TIPO_LABELS[p.tipo] || p.tipo)}</span>
+                <span class="admin-row__amount">$${p.monto} ${escapeHtml(p.moneda)}</span>
+            </div>
+            <p class="admin-row__meta">
+                Usuario: <span class="mono">${escapeHtml(p.user_id.slice(0, 8))}</span> ·
+                ${escapeHtml(formatDate(p.created_at))}
+                ${p.referencia ? `· ref: <span class="mono">${escapeHtml(p.referencia.slice(0, 8))}</span>` : ''}
+            </p>
+            <div class="admin-row__actions">
+                <button class="btn btn-primary btn-sm" data-action="confirm">Confirmar</button>
+                <button class="btn btn-ghost btn-sm" data-action="reject">Rechazar</button>
+            </div>
+        </div>
+    `).join('');
+
+    if (!container.dataset.delegated) {
+        container.dataset.delegated = 'true';
+        container.addEventListener('click', async (e) => {
+            const btn = e.target.closest('button[data-action]');
+            if (!btn) return;
+            const row = btn.closest('[data-payment-id]');
+            const paymentId = row.dataset.paymentId;
+            const action = btn.dataset.action;
+
+            if (action === 'reject') {
+                const ok = await showConfirm({
+                    title: 'Rechazar pago',
+                    message: 'El usuario no recibirá el beneficio solicitado.',
+                    confirmLabel: 'Rechazar',
+                    danger: true,
+                });
+                if (!ok) return;
+            }
+
+            btn.disabled = true;
+            try {
+                await apiFetch(`/payments/${encodeURIComponent(paymentId)}/${action}`, { method: 'POST' });
+                notify(action === 'confirm' ? 'Pago confirmado.' : 'Pago rechazado.', 'success');
+                row.remove();
+                if (!container.querySelector('[data-payment-id]')) {
+                    container.innerHTML = '<p class="empty-state">No hay pagos pendientes.</p>';
+                }
+            } catch (err) {
+                notify(`Error: ${err.message}`, 'error');
+                btn.disabled = false;
+            }
+        });
+    }
+}
+
+export async function loadAdsAdmin() {
+    const container = document.getElementById('adminAnuncios');
+    if (!container) return;
+    container.innerHTML = '<p class="empty-state">Cargando…</p>';
+
+    let ads;
+    try {
+        ads = await apiFetch('/ads/');
+    } catch (err) {
+        container.innerHTML = `<p class="empty-state">Error: ${escapeHtml(err.message)}</p>`;
+        return;
+    }
+
+    if (!ads.length) {
+        container.innerHTML = '<p class="empty-state">No hay anuncios todavía.</p>';
+        return;
+    }
+
+    container.innerHTML = ads.map(ad => `
+        <div class="admin-row" data-ad-id="${ad.id}">
+            <div class="admin-row__top">
+                <span class="admin-row__type">${escapeHtml(ad.marca)}</span>
+                <span class="chip ${ad.activo ? 'chip--estado-activa' : 'chip--estado-cancelada'}">${ad.activo ? 'Activo' : 'Pausado'}</span>
+            </div>
+            <p class="admin-row__meta">
+                ${escapeHtml(ad.texto)}<br>
+                👁 ${ad.impresiones} · 🖱 ${ad.clics}
+                ${ad.fecha_fin ? `· vence ${escapeHtml(formatDate(ad.fecha_fin))}` : ''}
+            </p>
+            <div class="admin-row__actions">
+                <button class="btn ${ad.activo ? 'btn-ghost' : 'btn-primary'} btn-sm" data-action="toggle">
+                    ${ad.activo ? 'Pausar' : 'Activar'}
+                </button>
+            </div>
+        </div>
+    `).join('');
+
+    if (!container.dataset.delegated) {
+        container.dataset.delegated = 'true';
+        container.addEventListener('click', async (e) => {
+            const btn = e.target.closest('button[data-action="toggle"]');
+            if (!btn) return;
+            const row = btn.closest('[data-ad-id]');
+            btn.disabled = true;
+            try {
+                await apiFetch(`/ads/${encodeURIComponent(row.dataset.adId)}/toggle`, { method: 'POST' });
+                loadAdsAdmin();
+            } catch (err) {
+                notify(`Error: ${err.message}`, 'error');
+                btn.disabled = false;
+            }
+        });
+    }
+}
+
+export function initAdminPanel() {
+    document.querySelectorAll('.admin-tab').forEach(tab => {
+        tab.addEventListener('click', () => {
+            document.querySelectorAll('.admin-tab').forEach(t => t.classList.toggle('is-active', t === tab));
+            const isPagos = tab.dataset.tab === 'pagos';
+            document.getElementById('adminPagos')?.classList.toggle('hidden', !isPagos);
+            document.getElementById('adminAnuncios')?.classList.toggle('hidden', isPagos);
+            if (isPagos) loadPendingPayments();
+            else loadAdsAdmin();
+        });
+    });
+}

@@ -1,0 +1,45 @@
+# Base de datos: Supabase (no Render Postgres) — el plan free de Render
+# borra la base de datos administrada a los 30 días; el free tier de
+# Supabase persiste indefinidamente (solo se pausa tras ~1 semana sin
+# uso, y se reactiva sola con la primera petición). Ver README > "Base
+# de datos (Supabase)" para cómo crear el proyecto y obtener la cadena
+# de conexión correcta (pooler, no la conexión directa).
+services:
+  - type: web
+    name: servicios-api
+    runtime: python
+    buildCommand: pip install -r backend/requirements.txt
+    startCommand: uvicorn backend.app.main:app --host 0.0.0.0 --port $PORT
+    envVars:
+      # Pegar aquí la cadena del "Session pooler" de Supabase (puerto
+      # 5432, no el 6543 de "Transaction pooler" — esta app mantiene su
+      # propio pool de conexiones persistente, no es una función
+      # serverless de una sola query). sync:false = se carga a mano en
+      # el dashboard de Render, nunca queda en el repo.
+      - key: DATABASE_URL
+        sync: false
+      - key: SECRET_KEY
+        generateValue: true
+      - key: ALGORITHM
+        value: HS256
+      - key: ACCESS_TOKEN_EXPIRE_MINUTES
+        value: 30
+      # Generar UNA VEZ con `python backend/generate_vapid_key.py` y pegar
+      # el PEM completo aquí. Si se deja vacío, la app genera una clave al
+      # arrancar — pero como el disco de Render (plan free) es efímero,
+      # esa clave se perdería en cada redeploy e invalidaría todas las
+      # suscripciones push existentes. sync:false = Render pide el valor
+      # a mano en el dashboard, no lo pisa en cada deploy.
+      - key: VAPID_PRIVATE_KEY_PEM
+        sync: false
+      - key: VAPID_CLAIM_EMAIL
+        value: mailto:soporte@servicuba.example
+      # Credenciales del primer usuario admin (confirma pagos, gestiona
+      # anuncios). Se crea/promueve automáticamente al arrancar — ver
+      # sección "Monetización" del README. sync:false = se cargan a mano
+      # en el dashboard de Render, nunca quedan en el repo.
+      - key: ADMIN_PHONE
+        sync: false
+      - key: ADMIN_PASSWORD
+        sync: false
+    plan: free
