@@ -67,6 +67,27 @@ def apply_to_task(
     return db_app
 
 
+@router.get("/mine")
+def list_my_applications(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """IDs de tareas a las que el trabajador ya se postuló (pendiente o
+    aceptada). Antes esto sólo se rastreaba en memoria del navegador
+    (appliedTaskIds en tasks.js), así que se perdía al recargar la
+    página: el botón volvía a mostrar "Postular" para una tarea ya
+    postulada y el backend respondía 400 al reintentar."""
+    rows = (
+        db.query(Application.task_id)
+        .filter(
+            Application.worker_id == current_user.id,
+            Application.estado.in_([AppStatus.PENDIENTE, AppStatus.ACEPTADA]),
+        )
+        .all()
+    )
+    return [str(r.task_id) for r in rows]
+
+
 @router.get("/task/{task_id}")
 def list_task_applications(
     task_id: UUID,
