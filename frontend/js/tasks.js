@@ -11,6 +11,10 @@ import { requestFeatureTask } from './monetization.js';
 // Evita que dos cargas de "tareas cercanas" se pisen entre sí.
 let nearbyTasksAbortController = null;
 
+// Categorías cargadas por loadCategories(); se reutilizan para construir
+// el selector de "Nueva tarea" sin volver a pedirlas al backend.
+let loadedCategories = [];
+
 // ---------- Categorías ----------
 
 export async function loadCategories() {
@@ -21,6 +25,8 @@ export async function loadCategories() {
         notify(`No se pudieron cargar las categorías: ${err.message}`, 'error');
         return;
     }
+
+    loadedCategories = cats;
 
     const selects = ['regCategoria', 'filtroCategoria'];
     selects.forEach(id => {
@@ -298,13 +304,32 @@ async function loadMyTasks() {
 
 // ---------- Crear tarea ----------
 
-const VALID_CATEGORY_IDS = [1, 2, 3, 4];
-
 export function initTasks() {
     document.getElementById('newTaskBtn')?.addEventListener('click', handleNewTaskClick);
 }
 
 async function handleNewTaskClick() {
+    // Si por algún motivo todavía no se cargaron (p.ej. loadCategories()
+    // falló), se vuelve a intentar aquí antes de abrir el modal — sin
+    // categorías no hay nada que mostrar en el selector.
+    if (!loadedCategories.length) {
+        try {
+            loadedCategories = await apiFetch('/categories');
+        } catch (err) {
+            notify(`No se pudieron cargar las categorías: ${err.message}`, 'error');
+            return;
+        }
+    }
+    if (!loadedCategories.length) {
+        notify('No hay categorías disponibles todavía.', 'error');
+        return;
+    }
+
+    const categoryOptions = loadedCategories.map(c => ({
+        value: String(c.id),
+        label: `${c.icono ? c.icono + ' ' : ''}${c.nombre}`
+    }));
+
     const result = await showFormModal({
         title: 'Nueva tarea',
         confirmLabel: 'Continuar',
@@ -312,15 +337,15 @@ async function handleNewTaskClick() {
             { name: 'titulo', label: 'Título', type: 'text', required: true, placeholder: 'Ej: Armar mueble de IKEA' },
             { name: 'descripcion', label: 'Descripción', type: 'textarea', placeholder: 'Detalles del trabajo...' },
             { name: 'precio', label: 'Precio estimado', type: 'number', min: 0, step: '0.01', placeholder: '0.00' },
-            { name: 'categoria_id', label: 'ID de categoría (1-4)', type: 'number', min: 1, required: true, placeholder: '1' }
+            { name: 'categoria_id', label: 'Categoría', type: 'select', required: true, options: categoryOptions }
         ]
     });
 
     if (result === null) return;
 
-    const categoria = Math.trunc(result.categoria_id);
-    if (!VALID_CATEGORY_IDS.includes(categoria)) {
-        notify('La categoría debe ser un número entre 1 y 4.', 'error');
+    const categoria = parseInt(result.categoria_id, 10);
+    if (!loadedCategories.some(c => c.id === categoria)) {
+        notify('Selecciona una categoría válida.', 'error');
         return;
     }
 

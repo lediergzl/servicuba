@@ -91,7 +91,8 @@ export function notify(message, type = 'info') {
 
 /**
  * Modal genérico basado en promesas (reemplaza prompt()/confirm()).
- * fields: [{ name, label, type: 'text'|'textarea'|'number', placeholder, required, min }]
+ * fields: [{ name, label, type: 'text'|'textarea'|'number'|'select', placeholder, required, min, options }]
+ * options (solo para type:'select'): [{ value, label }]
  */
 export function showFormModal({ title, fields, confirmLabel = 'Guardar', cancelLabel = 'Cancelar' }) {
     ensureUiRoot();
@@ -124,6 +125,14 @@ export function showFormModal({ title, fields, confirmLabel = 'Guardar', cancelL
             if (field.type === 'textarea') {
                 input = document.createElement('textarea');
                 input.rows = 3;
+            } else if (field.type === 'select') {
+                input = document.createElement('select');
+                (field.options || []).forEach(opt => {
+                    const optionEl = document.createElement('option');
+                    optionEl.value = opt.value;
+                    optionEl.textContent = opt.label;
+                    input.appendChild(optionEl);
+                });
             } else {
                 input = document.createElement('input');
                 input.type = field.type || 'text';
@@ -131,7 +140,7 @@ export function showFormModal({ title, fields, confirmLabel = 'Guardar', cancelL
                 if (field.step !== undefined) input.step = field.step;
             }
             input.className = 'field-input';
-            input.placeholder = field.placeholder || '';
+            if (field.type !== 'select') input.placeholder = field.placeholder || '';
             if (field.required) input.required = true;
             if (field.value !== undefined) input.value = field.value;
 
@@ -191,6 +200,12 @@ export function showFormModal({ title, fields, confirmLabel = 'Guardar', cancelL
 
             for (const [name, { input, errorMsg, field }] of Object.entries(inputs)) {
                 errorMsg.classList.add('hidden');
+
+                if (field.type === 'select') {
+                    values[name] = input.value;
+                    continue;
+                }
+
                 const raw = input.value.trim();
 
                 if (field.required && !raw) {
