@@ -4,7 +4,7 @@
 Plataforma PWA para conectar clientes y trabajadores en Cuba mediante geolocalización.
 
 ## Tecnologías
-- Backend: FastAPI, PostgreSQL con PostGIS (hospedado en Supabase)
+- Backend: FastAPI, PostgreSQL con PostGIS (hospedado en Neon)
 - Frontend: PWA (HTML5, Tailwind, JavaScript Vanilla)
 - Mapas: Leaflet + OpenStreetMap
 
@@ -34,50 +34,52 @@ Las tablas y las categorías por defecto (Electricista, Plomero, Reparador,
 Albañil — ids 1-4, que es lo que el frontend asume) se crean automáticamente
 en el primer arranque contra una base de datos vacía.
 
-## Base de datos (Supabase)
+## Base de datos (Neon)
 
-Se usa Supabase en vez de la base de datos administrada de Render porque
-**el plan free de Render borra el Postgres a los 30 días** — el free tier
-de Supabase persiste indefinidamente (solo se pausa tras ~1 semana sin
-tráfico, y se reactiva sola con la primera petición que le llegue, que
-puede tardar unos segundos).
+Se usa Neon en vez de la base de datos administrada de Render porque **el
+plan free de Render borra el Postgres a los 30 días** — el free tier de
+Neon persiste indefinidamente (el cómputo "escala a cero" tras ~5 min sin
+tráfico y se reactiva solo con la siguiente conexión, normalmente en menos
+de un segundo — no es una pausa de proyecto completo como en otros
+proveedores, así que no hace falta "despertarlo" a mano).
 
 ### Crear el proyecto
-1. Crear cuenta/proyecto en [supabase.com](https://supabase.com) (plan free).
-2. Habilitar PostGIS: en el dashboard, **Database → Extensions**, buscar
-   `postgis` y activarla. (No es estrictamente necesario hacerlo a mano —
-   el backend ya ejecuta `CREATE EXTENSION IF NOT EXISTS postgis` al
-   arrancar — pero confirmarlo en el dashboard evita sorpresas si el rol
-   de conexión no tuviera permiso.)
-3. Ir a **Project Settings → Database → Connection string** y copiar la
-   del **"Session pooler"** (puerto `5432`), **no** la conexión directa ni
-   la del "Transaction pooler" (puerto `6543`):
-   - La conexión **directa** en el plan free de Supabase es IPv6-only —
-     Render no siempre tiene salida IPv6, así que suele fallar en silencio
-     (timeout de conexión).
-   - El **Transaction pooler** (6543) no soporta el ciclo de vida de
-     conexión que espera el pool propio de SQLAlemy/psycopg2 tan bien como
-     el Session pooler para una app de larga duración como esta (no es
-     una función serverless de una sola query).
-   - El **Session pooler** (5432) es compatible con IPv4 y se comporta
-     como un Postgres normal — es el que hay que usar acá.
-4. Pegar esa cadena completa (con la contraseña real, no el placeholder)
-   como `DATABASE_URL` — local en `backend/.env`, en producción en la
-   variable de entorno del servicio en Render.
+1. Crear cuenta/proyecto en [neon.tech](https://neon.tech) (plan free).
+2. Habilitar PostGIS: en el SQL Editor del dashboard, correr:
+   ```sql
+   CREATE EXTENSION IF NOT EXISTS postgis;
+   ```
+   (No es estrictamente necesario hacerlo a mano — el backend ya ejecuta
+   esto mismo al arrancar — pero confirmarlo evita sorpresas si el rol de
+   conexión no tuviera permiso.)
+3. En **Connection Details** del dashboard, copiar la cadena con
+   **"Pooled connection"** activado (el hostname trae `-pooler`, ej.
+   `ep-xxxxxxxx-pooler.us-east-2.aws.neon.tech`) — no la conexión directa
+   (sin `-pooler`). El pooler (PgBouncer del lado de Neon) soporta bien
+   muchas conexiones cortas típicas de una app web; la conexión directa
+   tiene un límite mucho más bajo y no hace falta para este caso.
+4. Esa cadena ya trae `?sslmode=require` al final — Neon exige SSL, así
+   que hay que pegarla completa, no recortarla.
+5. Pegar esa cadena (con la contraseña real, no el placeholder) como
+   `DATABASE_URL` — local en `backend/.env`, en producción en la variable
+   de entorno del servicio en Render.
 
 ### Notas
 - `backend/app/database.py` ya configura `pool_pre_ping=True` (para que una
-  conexión muerta tras la pausa de inactividad de Supabase se renueve sola
-  en vez de tirar un error) y límites de pool conservadores (`pool_size=5`,
-  `max_overflow=5`) acordes al límite de conexiones del plan free.
-- La primera petición después de que el proyecto estuvo pausado puede
-  tardar varios segundos mientras Supabase lo reactiva — es esperado, no
-  un error.
+  conexión muerta tras el "scale to zero" de Neon se descarte y se abra
+  una nueva en vez de tirar un error), `pool_recycle=300` (recicla
+  conexiones cada 5 min, alineado con el timeout de hibernado por
+  defecto de Neon) y límites de pool conservadores (`pool_size=5`,
+  `max_overflow=5`).
+- La primera petición después de un rato de inactividad puede tardar un
+  poco más de lo normal mientras Neon reactiva el cómputo — es esperado,
+  no un error. En el free tier suele ser cuestión de milisegundos a un
+  par de segundos, no minutos.
 
 ## Despliegue en Render
 - Conectar repositorio de GitHub.
 - Usar `render.yaml` proporcionado (un único Web Service sirve API + frontend).
-- Crear el proyecto de Supabase primero (ver sección anterior) y pegar su
+- Crear el proyecto de Neon primero (ver sección anterior) y pegar su
   cadena de conexión en la variable `DATABASE_URL` del servicio en Render
   (el `render.yaml` la declara con `sync: false`, así que Render la va a
   pedir en el dashboard — no hay base de datos de Render que provisionar).

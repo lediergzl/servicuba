@@ -5,14 +5,16 @@ from .config import get_settings
 
 settings = get_settings()
 
-# pool_pre_ping: Supabase (plan free) pausa el proyecto tras ~1 semana sin
-# uso y además su pooler puede cerrar conexiones inactivas — sin esto, la
-# primera petición tras un rato de inactividad fallaría con una conexión
-# muerta en vez de reconectar sola.
-# pool_size/max_overflow conservadores: el pooler de Supabase en el plan
-# free tiene un límite de conexiones simultáneas compartido con el resto
-# del proyecto (Studio, otros servicios, etc.) — no tiene sentido pedir
-# más de las que un solo servicio web pequeño necesita.
+# pool_pre_ping: Neon (plan free) "escala a cero" el cómputo tras ~5 min sin
+# uso — la conexión se corta y Neon reactiva el cómputo solo en la próxima
+# conexión nueva (unos cientos de ms a pocos segundos). Sin pre_ping, la
+# primera petición tras ese hibernado fallaría con una conexión muerta en
+# el pool en vez de descartarla y abrir una nueva.
+# pool_size/max_overflow conservadores: acordes a un solo servicio web
+# pequeño; de más no sirve ya que el pooler de Neon (PgBouncer) multiplexa
+# igual del lado del servidor.
+# pool_recycle: recicla conexiones cada 5 min para no aferrarse a una
+# conexión que el hibernado de Neon ya cortó del otro lado.
 engine = create_engine(
     settings.DATABASE_URL,
     pool_pre_ping=True,

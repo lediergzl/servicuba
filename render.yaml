@@ -1,9 +1,9 @@
-# Base de datos: Supabase (no Render Postgres) — el plan free de Render
-# borra la base de datos administrada a los 30 días; el free tier de
-# Supabase persiste indefinidamente (solo se pausa tras ~1 semana sin
-# uso, y se reactiva sola con la primera petición). Ver README > "Base
-# de datos (Supabase)" para cómo crear el proyecto y obtener la cadena
-# de conexión correcta (pooler, no la conexión directa).
+# Base de datos: Neon (no Render Postgres) — el plan free de Render borra
+# la base de datos administrada a los 30 días; el free tier de Neon
+# persiste indefinidamente (el cómputo "escala a cero" tras ~5 min sin
+# uso y se reactiva solo en la siguiente conexión, en general en menos
+# de un segundo). Ver README > "Base de datos (Neon)" para cómo crear el
+# proyecto y obtener la cadena de conexión correcta.
 services:
   - type: web
     name: servicios-api
@@ -11,11 +11,10 @@ services:
     buildCommand: pip install -r backend/requirements.txt
     startCommand: uvicorn backend.app.main:app --host 0.0.0.0 --port $PORT
     envVars:
-      # Pegar aquí la cadena del "Session pooler" de Supabase (puerto
-      # 5432, no el 6543 de "Transaction pooler" — esta app mantiene su
-      # propio pool de conexiones persistente, no es una función
-      # serverless de una sola query). sync:false = se carga a mano en
-      # el dashboard de Render, nunca queda en el repo.
+      # Pegar aquí la cadena de conexión "Pooled" de Neon (la que trae
+      # "-pooler" en el hostname), tal cual la copia el dashboard —
+      # ya incluye "?sslmode=require", que Neon exige. sync:false = se
+      # carga a mano en el dashboard de Render, nunca queda en el repo.
       - key: DATABASE_URL
         sync: false
       - key: SECRET_KEY
