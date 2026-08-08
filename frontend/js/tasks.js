@@ -213,7 +213,22 @@ export function showDashboardCliente() {
 export function showDashboardTrabajador() {
     switchView('dashboardTrabajador');
     setupTaskListDelegation();
+    setupNearbyFiltersListeners();
     loadNearbyTasks();
+}
+
+// Los <select> de radio/categoría no disparaban ninguna recarga: sus
+// valores sólo se leían dentro de loadNearbyTasks(), pero nada llamaba
+// a esa función al cambiarlos, así que el filtro parecía no hacer nada
+// hasta refrescar la página entera.
+function setupNearbyFiltersListeners() {
+    const radioSel = document.getElementById('filtroRadio');
+    const catSel = document.getElementById('filtroCategoria');
+    [radioSel, catSel].forEach(sel => {
+        if (!sel || sel.dataset.listenerAttached) return;
+        sel.dataset.listenerAttached = 'true';
+        sel.addEventListener('change', () => loadNearbyTasks());
+    });
 }
 
 export function switchView(viewId) {
