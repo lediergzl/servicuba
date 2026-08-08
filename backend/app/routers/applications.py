@@ -66,6 +66,45 @@ def apply_to_task(
     )
     return db_app
 
+
+@router.get("/task/{task_id}")
+def list_task_applications(
+    task_id: UUID,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Postulaciones pendientes de una tarea — sólo el cliente dueño puede
+    verlas. Sin este endpoint no había ninguna forma de que el cliente
+    supiera quién se postuló ni de aceptar a un trabajador: apply_to_task
+    enviaba el push de aviso pero no existía ninguna pantalla para
+    consultar/actuar sobre esas postulaciones."""
+    task = db.query(Task).filter(Task.id == task_id).first()
+    if not task:
+        raise HTTPException(status_code=404, detail="Tarea no encontrada")
+    if task.cliente_id != current_user.id:
+        raise HTTPException(status_code=403, detail="No eres el cliente de esta tarea")
+
+    rows = (
+        db.query(Application, User)
+        .join(User, User.id == Application.worker_id)
+        .filter(Application.task_id == task_id, Application.estado == AppStatus.PENDIENTE)
+        .order_by(Application.created_at.asc())
+        .all()
+    )
+    return [
+        {
+            "id": str(app.id),
+            "worker_id": str(worker.id),
+            "worker_nombre": worker.nombre,
+            "worker_rating": worker.rating or 0.0,
+            "worker_verificado": worker.verificado,
+            "mensaje": app.mensaje,
+            "created_at": app.created_at.isoformat(),
+        }
+        for app, worker in rows
+    ]
+
+
 @router.post("/{application_id}/accept")
 def accept_application(
     application_id: UUID,
