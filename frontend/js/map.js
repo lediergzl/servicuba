@@ -1,5 +1,11 @@
 let map = null;
 let marker = null;
+let taskMarkers = [];
+
+function clearTaskMarkers() {
+    taskMarkers.forEach(m => map.removeLayer(m));
+    taskMarkers = [];
+}
 
 export function initMap() {
     document.getElementById('toggleMapBtn')?.addEventListener('click', () => {
@@ -22,14 +28,26 @@ export function initMap() {
                     if (marker) map.removeLayer(marker);
                     marker = L.marker([lat, lng]).addTo(map)
                         .bindPopup('Tu ubicación');
-                    fetch(`/api/tasks/nearby?lat=${lat}&lng=${lng}&radius_km=5`, {
+
+                    const radius = document.getElementById('filtroRadio')?.value || 5;
+                    const category = document.getElementById('filtroCategoria')?.value || '';
+                    const params = new URLSearchParams({ lat, lng, radius_km: radius });
+                    if (category) params.set('category_id', category);
+
+                    fetch(`/api/tasks/nearby?${params.toString()}`, {
                         headers: { 'Authorization': `Bearer ${token}` }
                     })
                     .then(res => res.json())
                     .then(tasks => {
+                        clearTaskMarkers();
                         tasks.forEach(t => {
-                            // Nota: la API no devuelve lat/lng en esta versión,
-                            // se puede extender.
+                            if (t.lat == null || t.lng == null) return;
+                            const taskMarker = L.marker([t.lat, t.lng]).addTo(map)
+                                .bindPopup(
+                                    `<strong>${t.destacada ? '★ ' : ''}${escapeHtmlLocal(t.titulo)}</strong><br>`
+                                    + `$${escapeHtmlLocal(String(t.precio ?? 0))} · ${escapeHtmlLocal(String(t.distancia_km))} km`
+                                );
+                            taskMarkers.push(taskMarker);
                         });
                     });
                 },
@@ -39,4 +57,12 @@ export function initMap() {
             mapDiv.classList.add('hidden');
         }
     });
+}
+
+// Pequeño escape local para no depender de core.js dentro de un innerHTML
+// de Leaflet (bindPopup no pasa por el DOM normal de la app).
+function escapeHtmlLocal(str) {
+    const div = document.createElement('div');
+    div.textContent = str ?? '';
+    return div.innerHTML;
 }
