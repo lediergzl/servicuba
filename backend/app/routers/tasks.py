@@ -14,7 +14,7 @@ from typing import Optional
 
 router = APIRouter()
 
-@router.post("/", response_model=TaskResponse)
+@router.post("", response_model=TaskResponse)
 def create_task(
     task: TaskCreate,
     db: Session = Depends(get_db),
