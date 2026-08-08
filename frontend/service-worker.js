@@ -1,4 +1,12 @@
-const CACHE_NAME = 'servicuba-v3';
+// Sube este número en CADA deploy que toque archivos de frontend/js o
+// frontend/css. Antes CACHE_NAME quedaba fijo entre despliegues: como el
+// navegador sólo re-instala el service worker cuando ESTE archivo cambia
+// byte a byte, un deploy que sólo tocara tasks.js/core.js/etc. nunca
+// disparaba 'install' — el navegador seguía sirviendo los JS viejos desde
+// caché indefinidamente, aunque el servidor ya tuviera el código nuevo.
+const CACHE_VERSION = 'v4';
+const CACHE_NAME = `servicuba-${CACHE_VERSION}`;
+
 const urlsToCache = [
   '/',
   '/index.html',
@@ -27,15 +35,6 @@ self.addEventListener('install', event => {
   );
 });
 
-self.addEventListener('fetch', event => {
-  // Nunca cachear la API ni el WebSocket de chat — sólo el shell estático.
-  if (event.request.url.includes('/api/')) return;
-  event.respondWith(
-    caches.match(event.request)
-      .then(response => response || fetch(event.request))
-  );
-});
-
 self.addEventListener('activate', event => {
   event.waitUntil(
     caches.keys().then(cacheNames => {
@@ -44,6 +43,41 @@ self.addEventListener('activate', event => {
           .map(name => caches.delete(name))
       );
     }).then(() => self.clients.claim())
+  );
+});
+
+// Network-first para el app shell (HTML/JS/CSS/manifest): siempre intenta
+// traer la versión más reciente del servidor primero, y sólo cae al caché
+// si no hay red (modo offline). Esto evita el problema de fondo: con
+// cache-first, un deploy nuevo de tasks.js/core.js/etc. quedaba invisible
+// para cualquiera que ya tuviera la PWA instalada/visitada antes, hasta
+// que ESTE archivo cambiara. Los íconos (que casi nunca cambian) se
+// sirven cache-first para no gastar red en cada carga.
+const CACHE_FIRST_PATTERNS = [/\/assets\/icons\//];
+
+self.addEventListener('fetch', event => {
+  const url = event.request.url;
+  if (url.includes('/api/')) return; // nunca cachear la API ni el WS de chat
+
+  const useCacheFirst = CACHE_FIRST_PATTERNS.some(re => re.test(url));
+
+  if (useCacheFirst) {
+    event.respondWith(
+      caches.match(event.request).then(cached => cached || fetch(event.request))
+    );
+    return;
+  }
+
+  event.respondWith(
+    fetch(event.request)
+      .then(response => {
+        // Guarda una copia fresca en caché para el modo offline, sin
+        // bloquear la respuesta al usuario.
+        const copy = response.clone();
+        caches.open(CACHE_NAME).then(cache => cache.put(event.request, copy)).catch(() => {});
+        return response;
+      })
+      .catch(() => caches.match(event.request))
   );
 });
 
