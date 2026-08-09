@@ -68,6 +68,26 @@ with engine.connect() as conn:
     conn.execute(text(
         "ALTER TABLE ads ADD COLUMN IF NOT EXISTS contacto VARCHAR(50)"
     ))
+    # ---------- Índices para /api/tasks/nearby ----------
+    # Esa consulta filtra por Task.estado y castea Task.ubicacion a
+    # geography para usar ST_DWithin/ST_Distance (ver routers/tasks.py).
+    # Sin un índice que calce con ESE cast, Postgres tiene que escanear
+    # toda la tabla de tareas en cada búsqueda "cercanas" — en una
+    # conexión lenta eso duplica el problema: además del round-trip lento
+    # del cliente, el propio backend tarda más en responder. El índice
+    # GIST se crea sobre la expresión "ubicacion::geography" (idéntica al
+    # cast que usa la query) para que el planner realmente pueda usarlo.
+    conn.execute(text(
+        "CREATE INDEX IF NOT EXISTS idx_tasks_ubicacion_geog "
+        "ON tasks USING GIST ((ubicacion::geography))"
+    ))
+    # Filtro compuesto habitual de esa misma consulta (estado='activa' +
+    # categoría opcional) — acelera el filtrado antes de llegar al cálculo
+    # de distancia.
+    conn.execute(text(
+        "CREATE INDEX IF NOT EXISTS idx_tasks_estado_categoria "
+        "ON tasks (estado, categoria_id)"
+    ))
     conn.commit()
 
 # Categorías por defecto: el frontend (regCategoria / filtroCategoria /
