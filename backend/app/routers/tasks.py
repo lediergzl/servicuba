@@ -89,7 +89,7 @@ def get_nearby_tasks(
         })
     return tasks
 
-@router.get("/my", response_model=list[TaskResponse])
+@router.get("/my")
 def get_my_tasks(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
@@ -98,12 +98,47 @@ def get_my_tasks(
     # y el router original no lo definía (era una llamada rota).
     # Debe declararse ANTES de /{task_id} para que "my" no se intente
     # interpretar como un UUID.
-    return (
+    from ..models.application import Application, AppStatus
+    from ..models.user import User as UserModel
+
+    tasks = (
         db.query(Task)
         .filter(Task.cliente_id == current_user.id)
         .order_by(Task.created_at.desc())
         .all()
     )
+
+    result = []
+    for task in tasks:
+        # Nombre del trabajador aceptado (si lo hay) — se usa para poner
+        # un encabezado real en el chat en vez de dejarlo en blanco.
+        worker_nombre = None
+        if task.estado.value in ("asignada", "en_proceso", "completada"):
+            row = (
+                db.query(UserModel.nombre)
+                .join(Application, Application.worker_id == UserModel.id)
+                .filter(Application.task_id == task.id, Application.estado == AppStatus.ACEPTADA)
+                .first()
+            )
+            worker_nombre = row.nombre if row else None
+
+        result.append({
+            "id": str(task.id),
+            "cliente_id": str(task.cliente_id),
+            "categoria_id": task.categoria_id,
+            "titulo": task.titulo,
+            "descripcion": task.descripcion,
+            "precio": task.precio,
+            "municipio": task.municipio,
+            "zona": task.zona,
+            "referencia": task.referencia,
+            "estado": task.estado.value,
+            "destacada": task.destacada,
+            "destacada_hasta": task.destacada_hasta,
+            "created_at": task.created_at,
+            "trabajador_nombre": worker_nombre,
+        })
+    return result
 
 @router.get("/{task_id}", response_model=TaskResponse)
 def get_task(task_id: UUID, db: Session = Depends(get_db)):
