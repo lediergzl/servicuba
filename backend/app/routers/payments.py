@@ -27,6 +27,30 @@ INSTRUCCIONES_PAGO = (
 )
 
 
+@router.get("/pricing")
+def get_pricing():
+    """Antes el precio de cada beneficio (premium, destacar, anuncio) sólo
+    aparecía DESPUÉS de solicitarlo (en el toast de confirmación) — el
+    usuario nunca lo veía antes de decidir. Se expone acá para que el
+    frontend lo muestre de entrada, siempre leyendo de plans.py (la
+    única fuente de verdad de precios) en vez de hardcodear números
+    duplicados en el frontend."""
+    return {
+        "moneda": MONEDA_DEFECTO,
+        "premium": {
+            "precio": PRECIO_SUSCRIPCION_PREMIUM,
+            "dias": SUSCRIPCION_PREMIUM_DIAS,
+        },
+        "tarea_destacada": {
+            "precio": PRECIO_TAREA_DESTACADA,
+            "dias": TAREA_DESTACADA_DIAS,
+        },
+        "anuncio": {
+            "precio_por_dia": PRECIO_ANUNCIO_POR_DIA,
+        },
+    }
+
+
 @router.post("/subscribe", response_model=PaymentResponse)
 def request_subscription(
     db: Session = Depends(get_db),
