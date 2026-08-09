@@ -1,7 +1,8 @@
 // ============================================================
-// Panel de administración: pagos pendientes + anuncios
+// Panel de administración: pagos pendientes + anuncios + categorías
 // ============================================================
-import { apiFetch, notify, showConfirm, escapeHtml } from './core.js';
+import { apiFetch, notify, showConfirm, showFormModal, escapeHtml } from './core.js';
+import { loadCategories } from './tasks.js';
 
 const TIPO_LABELS = {
     suscripcion_trabajador: 'Suscripción premium',
@@ -151,15 +152,103 @@ export async function loadAdsAdmin() {
     }
 }
 
+// ---------- Categorías ----------
+// Antes no existía ninguna forma de crear categorías nuevas: sólo las 4
+// sembradas al arrancar el backend. Se agrega esta pestaña de admin
+// reutilizando el mismo patrón visual de anuncios/pagos.
+
+export async function loadCategoriesAdmin() {
+    const container = document.getElementById('adminCategorias');
+    if (!container) return;
+    container.innerHTML = '<p class="empty-state">Cargando…</p>';
+
+    let cats;
+    try {
+        cats = await apiFetch('/categories/all');
+    } catch (err) {
+        container.innerHTML = `<p class="empty-state">Error: ${escapeHtml(err.message)}</p>`;
+        return;
+    }
+
+    const listHtml = cats.length
+        ? cats.map(c => `
+            <div class="admin-row" data-cat-id="${c.id}">
+                <div class="admin-row__top">
+                    <span class="admin-row__type">${c.icono ? escapeHtml(c.icono) + ' ' : ''}${escapeHtml(c.nombre)}</span>
+                    <span class="chip ${c.activo ? 'chip--estado-activa' : 'chip--estado-cancelada'}">${c.activo ? 'Activa' : 'Pausada'}</span>
+                </div>
+                <div class="admin-row__actions">
+                    <button class="btn ${c.activo ? 'btn-ghost' : 'btn-primary'} btn-sm" data-action="toggle-cat">
+                        ${c.activo ? 'Pausar' : 'Activar'}
+                    </button>
+                </div>
+            </div>
+        `).join('')
+        : '<p class="empty-state">No hay categorías todavía.</p>';
+
+    container.innerHTML = `
+        <button id="newCategoryBtn" class="btn btn-accent btn-block btn-sm">+ Nueva categoría</button>
+        <div class="stack-sm mt-md">${listHtml}</div>
+    `;
+
+    document.getElementById('newCategoryBtn')?.addEventListener('click', async () => {
+        const result = await showFormModal({
+            title: 'Nueva categoría',
+            confirmLabel: 'Crear',
+            fields: [
+                { name: 'nombre', label: 'Nombre', type: 'text', required: true, placeholder: 'Ej: Carpintero' },
+                { name: 'icono', label: 'Emoji (opcional)', type: 'text', placeholder: '🪚' },
+            ]
+        });
+        if (result === null) return;
+
+        try {
+            await apiFetch('/categories', {
+                method: 'POST',
+                body: JSON.stringify({ nombre: result.nombre, icono: result.icono || null })
+            });
+            notify('Categoría creada.', 'success');
+            await loadCategoriesAdmin();
+            // Refresca los <select> de categoría del resto de la app
+            // (crear tarea, filtro de tareas cercanas, registro) sin
+            // necesidad de recargar la página.
+            await loadCategories();
+        } catch (err) {
+            notify(`Error: ${err.message}`, 'error');
+        }
+    });
+
+    const list = container.querySelector('.stack-sm');
+    if (list && !list.dataset.delegated) {
+        list.dataset.delegated = 'true';
+        list.addEventListener('click', async (e) => {
+            const btn = e.target.closest('button[data-action="toggle-cat"]');
+            if (!btn) return;
+            const row = btn.closest('[data-cat-id]');
+            btn.disabled = true;
+            try {
+                await apiFetch(`/categories/${encodeURIComponent(row.dataset.catId)}/toggle`, { method: 'POST' });
+                await loadCategoriesAdmin();
+                await loadCategories();
+            } catch (err) {
+                notify(`Error: ${err.message}`, 'error');
+                btn.disabled = false;
+            }
+        });
+    }
+}
+
 export function initAdminPanel() {
     document.querySelectorAll('.admin-tab').forEach(tab => {
         tab.addEventListener('click', () => {
             document.querySelectorAll('.admin-tab').forEach(t => t.classList.toggle('is-active', t === tab));
-            const isPagos = tab.dataset.tab === 'pagos';
-            document.getElementById('adminPagos')?.classList.toggle('hidden', !isPagos);
-            document.getElementById('adminAnuncios')?.classList.toggle('hidden', isPagos);
-            if (isPagos) loadPendingPayments();
-            else loadAdsAdmin();
+            document.getElementById('adminPagos')?.classList.toggle('hidden', tab.dataset.tab !== 'pagos');
+            document.getElementById('adminAnuncios')?.classList.toggle('hidden', tab.dataset.tab !== 'anuncios');
+            document.getElementById('adminCategorias')?.classList.toggle('hidden', tab.dataset.tab !== 'categorias');
+
+            if (tab.dataset.tab === 'pagos') loadPendingPayments();
+            else if (tab.dataset.tab === 'anuncios') loadAdsAdmin();
+            else if (tab.dataset.tab === 'categorias') loadCategoriesAdmin();
         });
     });
 }
