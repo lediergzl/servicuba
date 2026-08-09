@@ -1,17 +1,26 @@
-from pydantic import BaseModel
-from uuid import UUID
-from typing import Optional
-from datetime import datetime
+from sqlalchemy import Column, String, Integer, Text, Boolean, DateTime, ForeignKey
+from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.sql import func
+from ..database import Base
+import uuid
 
 
-class AdResponse(BaseModel):
-    id: UUID
-    marca: str
-    texto: str
-    url_destino: Optional[str]
-    categoria_id: Optional[int]
-    activo: bool
-    fecha_inicio: Optional[datetime]
-    fecha_fin: Optional[datetime]
-    impresiones: int
-    clics: int
+class Ad(Base):
+    __tablename__ = "ads"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    marca = Column(String(100), nullable=False)
+    texto = Column(Text, nullable=False)
+    url_destino = Column(String(500), nullable=True)
+    # Teléfono/WhatsApp del anunciante — antes el banner sólo mostraba un
+    # enlace si había url_destino, así que un negocio sin sitio web
+    # quedaba sin ninguna forma de que lo contactaran.
+    contacto = Column(String(50), nullable=True)
+    categoria_id = Column(Integer, ForeignKey("categories.id"), nullable=True)  # null = general
+    activo = Column(Boolean, default=False, nullable=False)  # se activa al confirmar el pago
+    fecha_inicio = Column(DateTime, nullable=True)
+    fecha_fin = Column(DateTime, nullable=True)
+    impresiones = Column(Integer, default=0, nullable=False)
+    clics = Column(Integer, default=0, nullable=False)
+    payment_id = Column(UUID(as_uuid=True), ForeignKey("payments.id"), nullable=True)
+    created_at = Column(DateTime, server_default=func.now())
