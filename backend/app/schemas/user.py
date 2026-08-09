@@ -33,3 +33,10 @@ class UserResponse(BaseModel):
     plan_expira: Optional[datetime] = None
     es_admin: bool
     created_at: datetime
+    # Oficio del trabajador — antes el perfil no distinguía en nada al
+    # trabajador del cliente más allá de la etiqueta "Trabajador"/"Cliente".
+    # None para clientes (no tienen categoria_id) o si la categoría fue
+    # desactivada.
+    categoria_id: Optional[int] = None
+    categoria_nombre: Optional[str] = None
+    categoria_icono: Optional[str] = None
