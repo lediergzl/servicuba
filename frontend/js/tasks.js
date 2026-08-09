@@ -308,6 +308,7 @@ async function loadMyTasks() {
         const canComplete = t.estado === 'asignada' || t.estado === 'en_proceso';
         const canFeature = t.estado === 'activa' && !t.destacada;
         const canViewApplications = t.estado === 'activa';
+        const canReview = t.estado === 'completada' && !t.ya_reseniada && t.trabajador_id;
 
         card.innerHTML = `
             <div class="task-card__row">
@@ -326,6 +327,8 @@ async function loadMyTasks() {
                 </button>` : ''}
                 ${canComplete ? `<button class="btn btn-primary btn-sm" data-action="complete" data-id="${t.id}">Marcar completada</button>` : ''}
                 ${canFeature ? `<button class="btn btn-secondary btn-sm" data-action="feature" data-id="${t.id}">★ Destacar</button>` : ''}
+                ${canReview ? `<button class="btn btn-accent btn-sm" data-action="review" data-id="${t.id}">★ Dejar reseña</button>` : ''}
+                ${t.estado === 'completada' && t.ya_reseniada ? '<span class="chip" style="color:var(--success);border-color:var(--success)">✓ Reseñada</span>' : ''}
             </div>
         `;
         container.appendChild(card);
@@ -345,6 +348,9 @@ async function loadMyTasks() {
             } else if (btn.dataset.action === 'applications') {
                 const titulo = btn.closest('.task-card')?.querySelector('.task-card__title')?.textContent || '';
                 await viewApplications(taskId, titulo);
+            } else if (btn.dataset.action === 'review') {
+                const t = myTasksCache.find(tt => String(tt.id) === String(taskId));
+                await leaveReview(taskId, t?.trabajador_id, t?.trabajador_nombre || 'el trabajador');
             } else if (btn.dataset.action === 'complete') {
                 const ok = await showConfirm({
                     title: 'Marcar tarea como completada',
@@ -451,6 +457,62 @@ async function viewApplications(taskId, tituloTarea) {
             btn.textContent = 'Aceptar';
         }
     });
+}
+
+// ---------- Dejar reseña (cliente) ----------
+// El endpoint POST /api/reviews/ existía en el backend desde el
+// principio, pero ningún archivo del frontend lo llamaba — no había
+// ninguna forma de dejar una reseña en toda la app.
+async function leaveReview(taskId, trabajadorId, trabajadorNombre) {
+    if (!trabajadorId) {
+        notify('No se pudo identificar al trabajador de esta tarea.', 'error');
+        return;
+    }
+
+    const result = await showFormModal({
+        title: `Reseña para ${trabajadorNombre}`,
+        confirmLabel: 'Enviar reseña',
+        fields: [
+            {
+                name: 'rating',
+                label: 'Calificación',
+                type: 'select',
+                required: true,
+                value: '5',
+                options: [
+                    { value: '5', label: '★★★★★ Excelente' },
+                    { value: '4', label: '★★★★ Muy bueno' },
+                    { value: '3', label: '★★★ Bueno' },
+                    { value: '2', label: '★★ Regular' },
+                    { value: '1', label: '★ Malo' },
+                ]
+            },
+            {
+                name: 'comentario',
+                label: 'Comentario (opcional)',
+                type: 'textarea',
+                placeholder: 'Ej: Muy puntual y buen trabajo.'
+            }
+        ]
+    });
+
+    if (result === null) return;
+
+    try {
+        await apiFetch('/reviews', {
+            method: 'POST',
+            body: JSON.stringify({
+                task_id: taskId,
+                trabajador_id: trabajadorId,
+                rating: parseInt(result.rating, 10),
+                comentario: result.comentario || null
+            })
+        });
+        notify('Reseña enviada. ¡Gracias!', 'success');
+        await loadMyTasks();
+    } catch (err) {
+        notify(`Error: ${err.message}`, 'error');
+    }
 }
 
 // ---------- Crear tarea ----------
