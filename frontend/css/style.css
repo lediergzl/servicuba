@@ -568,6 +568,15 @@ h1, h2, h3 {
 }
 .ad-banner__brand { font-weight: 700; font-size: var(--text-base); margin: 4px 0 2px; }
 .ad-banner__text { font-size: var(--text-sm); color: var(--muted); margin: 0; }
+.ad-banner__contact {
+    display: inline-block;
+    margin-top: 8px;
+    font-size: var(--text-sm);
+    font-weight: 600;
+    color: var(--copper);
+    text-decoration: none;
+}
+.ad-banner__contact:hover { text-decoration: underline; }
 
 /* ---------- Panel de administración ---------- */
 
