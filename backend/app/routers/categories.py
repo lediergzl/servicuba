@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Response
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 from ..database import get_db
@@ -10,7 +10,14 @@ from ..services.auth import get_current_admin
 router = APIRouter()
 
 @router.get("")
-def get_categories(db: Session = Depends(get_db)):
+def get_categories(response: Response, db: Session = Depends(get_db)):
+    # Las categorías casi nunca cambian y se piden en CADA carga de la
+    # app (loadCategories() en app.js). En una conexión lenta, evitarle
+    # al navegador ese round-trip repetido en cada visita pesa bastante
+    # más de lo que parece — con esta cabecera el navegador sirve la
+    # respuesta desde su propia caché HTTP durante 1 hora sin tocar la
+    # red en absoluto.
+    response.headers["Cache-Control"] = "public, max-age=3600"
     return db.query(Category).filter(Category.activo == True).all()  # noqa: E712
 
 
