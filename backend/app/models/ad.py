@@ -12,6 +12,10 @@ class Ad(Base):
     marca = Column(String(100), nullable=False)
     texto = Column(Text, nullable=False)
     url_destino = Column(String(500), nullable=True)
+    # Teléfono/WhatsApp del anunciante — antes el banner sólo mostraba un
+    # enlace si había url_destino, así que un negocio sin sitio web
+    # quedaba sin ninguna forma de que lo contactaran.
+    contacto = Column(String(50), nullable=True)
     categoria_id = Column(Integer, ForeignKey("categories.id"), nullable=True)  # null = general
     activo = Column(Boolean, default=False, nullable=False)  # se activa al confirmar el pago
     fecha_inicio = Column(DateTime, nullable=True)
