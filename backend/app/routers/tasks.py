@@ -1,7 +1,8 @@
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
-from sqlalchemy import func
+from sqlalchemy import func, cast
 from datetime import datetime
+from geoalchemy2 import Geography
 from geoalchemy2.functions import ST_DWithin, ST_Distance, ST_SetSRID, ST_MakePoint, ST_X, ST_Y
 from ..database import get_db
 from ..models.task import Task, TaskStatus
@@ -57,15 +58,23 @@ def get_nearby_tasks(
 
     radius_m = radius_km * 1000
     point = ST_SetSRID(ST_MakePoint(lng, lat), 4326)
+    # ubicacion es Geometry(SRID 4326): sin castear a geography, PostGIS
+    # calcula ST_Distance/ST_DWithin en GRADOS, no en metros. Eso hacía que
+    # "distancia_km" saliera siempre ~0 (una fracción de grado dividida
+    # entre 1000) y que ST_DWithin(..., radius_m) — comparando miles contra
+    # fracciones de grado — fuera prácticamente siempre verdadero sin
+    # importar el radio elegido, o sea el filtro de radio no filtraba nada.
+    geo_task = cast(Task.ubicacion, Geography)
+    geo_point = cast(point, Geography)
     now = datetime.utcnow()
     query = db.query(
         Task,
-        ST_Distance(Task.ubicacion, point).label("distance"),
+        ST_Distance(geo_task, geo_point).label("distance"),
         ST_Y(Task.ubicacion).label("task_lat"),
         ST_X(Task.ubicacion).label("task_lng"),
     ).filter(
         Task.estado == TaskStatus.ACTIVA,
-        ST_DWithin(Task.ubicacion, point, radius_m)
+        ST_DWithin(geo_task, geo_point, radius_m)
     )
     if category_id:
         query = query.filter(Task.categoria_id == category_id)
@@ -100,6 +109,7 @@ def get_my_tasks(
     # interpretar como un UUID.
     from ..models.application import Application, AppStatus
     from ..models.user import User as UserModel
+    from ..models.review import Review
 
     tasks = (
         db.query(Task)
@@ -112,15 +122,22 @@ def get_my_tasks(
     for task in tasks:
         # Nombre del trabajador aceptado (si lo hay) — se usa para poner
         # un encabezado real en el chat en vez de dejarlo en blanco.
+        worker_id = None
         worker_nombre = None
         if task.estado.value in ("asignada", "en_proceso", "completada"):
             row = (
-                db.query(UserModel.nombre)
+                db.query(UserModel.id, UserModel.nombre)
                 .join(Application, Application.worker_id == UserModel.id)
                 .filter(Application.task_id == task.id, Application.estado == AppStatus.ACEPTADA)
                 .first()
             )
-            worker_nombre = row.nombre if row else None
+            if row:
+                worker_id = str(row.id)
+                worker_nombre = row.nombre
+
+        ya_reseniada = False
+        if task.estado.value == "completada":
+            ya_reseniada = db.query(Review).filter(Review.task_id == task.id).first() is not None
 
         result.append({
             "id": str(task.id),
@@ -136,7 +153,9 @@ def get_my_tasks(
             "destacada": task.destacada,
             "destacada_hasta": task.destacada_hasta,
             "created_at": task.created_at,
+            "trabajador_id": worker_id,
             "trabajador_nombre": worker_nombre,
+            "ya_reseniada": ya_reseniada,
         })
     return result
 

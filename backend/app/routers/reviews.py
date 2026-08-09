@@ -10,7 +10,7 @@ from ..services.auth import get_current_user
 
 router = APIRouter()
 
-@router.post("/", response_model=ReviewResponse)
+@router.post("", response_model=ReviewResponse)
 def create_review(
     review: ReviewCreate,
     db: Session = Depends(get_db),
