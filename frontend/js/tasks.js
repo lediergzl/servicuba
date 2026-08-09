@@ -26,10 +26,17 @@ const appliedTaskIds = new Set();
 
 // ---------- Categorías ----------
 
-export async function loadCategories() {
+// GET /categories ahora trae Cache-Control: max-age=3600 (ver
+// routers/categories.py) para evitarle a la app ese round-trip en cada
+// carga en conexiones lentas. Eso significa que, si el admin acaba de
+// crear o pausar una categoría, un fetch normal podría devolver la copia
+// vieja del navegador hasta por una hora. forceRefresh=true (usado sólo
+// desde admin.js justo después de esas dos acciones) le pide al
+// navegador que ignore esa caché y vaya sí o sí a la red.
+export async function loadCategories(forceRefresh = false) {
     let cats;
     try {
-        cats = await apiFetch('/categories');
+        cats = await apiFetch('/categories', forceRefresh ? { cache: 'reload' } : undefined);
     } catch (err) {
         notify(`No se pudieron cargar las categorías: ${err.message}`, 'error');
         return;
