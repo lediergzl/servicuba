@@ -309,6 +309,8 @@ async function loadMyTasks() {
         const canFeature = t.estado === 'activa' && !t.destacada;
         const canViewApplications = t.estado === 'activa';
         const canReview = t.estado === 'completada' && !t.ya_reseniada && t.trabajador_id;
+        const canEdit = t.estado === 'activa';
+        const canCancel = t.estado === 'activa' || t.estado === 'asignada' || t.estado === 'en_proceso';
 
         card.innerHTML = `
             <div class="task-card__row">
@@ -329,6 +331,8 @@ async function loadMyTasks() {
                 ${canFeature ? `<button class="btn btn-secondary btn-sm" data-action="feature" data-id="${t.id}">★ Destacar</button>` : ''}
                 ${canReview ? `<button class="btn btn-accent btn-sm" data-action="review" data-id="${t.id}">★ Dejar reseña</button>` : ''}
                 ${t.estado === 'completada' && t.ya_reseniada ? '<span class="chip" style="color:var(--success);border-color:var(--success)">✓ Reseñada</span>' : ''}
+                ${canEdit ? `<button class="btn btn-secondary btn-sm" data-action="edit" data-id="${t.id}">Editar</button>` : ''}
+                ${canCancel ? `<button class="btn btn-ghost btn-sm" data-action="cancel" data-id="${t.id}" style="color:var(--brick)">Cancelar</button>` : ''}
             </div>
         `;
         container.appendChild(card);
@@ -351,6 +355,24 @@ async function loadMyTasks() {
             } else if (btn.dataset.action === 'review') {
                 const t = myTasksCache.find(tt => String(tt.id) === String(taskId));
                 await leaveReview(taskId, t?.trabajador_id, t?.trabajador_nombre || 'el trabajador');
+            } else if (btn.dataset.action === 'edit') {
+                const t = myTasksCache.find(tt => String(tt.id) === String(taskId));
+                await editTask(taskId, t);
+            } else if (btn.dataset.action === 'cancel') {
+                const ok = await showConfirm({
+                    title: 'Cancelar esta tarea',
+                    message: 'Los trabajadores que ya se postularon dejarán de poder aceptarla. Esta acción no se puede deshacer.',
+                    confirmLabel: 'Sí, cancelar',
+                    danger: true
+                });
+                if (!ok) return;
+                try {
+                    await apiFetch(`/tasks/${encodeURIComponent(taskId)}`, { method: 'DELETE' });
+                    notify('Tarea cancelada.', 'success');
+                    await loadMyTasks();
+                } catch (err) {
+                    notify(`Error: ${err.message}`, 'error');
+                }
             } else if (btn.dataset.action === 'complete') {
                 const ok = await showConfirm({
                     title: 'Marcar tarea como completada',
@@ -457,6 +479,42 @@ async function viewApplications(taskId, tituloTarea) {
             btn.textContent = 'Aceptar';
         }
     });
+}
+
+// ---------- Editar tarea (cliente) ----------
+// Antes no había ninguna forma de editar una tarea ya creada. Sólo se
+// permite mientras está "activa" (ver PUT /tasks/{id} en el backend) —
+// no se edita categoría/ubicación acá, para eso conviene cancelar y
+// crear una nueva.
+async function editTask(taskId, t) {
+    if (!t) return;
+
+    const result = await showFormModal({
+        title: 'Editar tarea',
+        confirmLabel: 'Guardar cambios',
+        fields: [
+            { name: 'titulo', label: 'Título', type: 'text', required: true, value: t.titulo },
+            { name: 'descripcion', label: 'Descripción', type: 'textarea', value: t.descripcion || '' },
+            { name: 'precio', label: 'Precio estimado', type: 'number', min: 0, step: '0.01', value: t.precio ?? '' },
+        ]
+    });
+
+    if (result === null) return;
+
+    try {
+        await apiFetch(`/tasks/${encodeURIComponent(taskId)}`, {
+            method: 'PUT',
+            body: JSON.stringify({
+                titulo: result.titulo,
+                descripcion: result.descripcion || '',
+                precio: result.precio || 0,
+            })
+        });
+        notify('Tarea actualizada.', 'success');
+        await loadMyTasks();
+    } catch (err) {
+        notify(`Error: ${err.message}`, 'error');
+    }
 }
 
 // ---------- Dejar reseña (cliente) ----------

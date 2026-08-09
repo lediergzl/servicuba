@@ -135,10 +135,16 @@ export function initSponsorAdEntry() {
                 { name: 'marca', label: 'Nombre de tu marca/negocio', type: 'text', required: true },
                 { name: 'texto', label: 'Texto del anuncio', type: 'textarea', required: true, placeholder: 'Ej: 20% de descuento esta semana' },
                 { name: 'url_destino', label: 'Enlace (opcional)', type: 'text', placeholder: 'https://...' },
+                { name: 'contacto', label: 'Teléfono / WhatsApp de contacto (opcional si pones un enlace)', type: 'text', placeholder: 'Ej: 53512345' },
                 { name: 'dias', label: precioLabel, type: 'number', min: 1, required: true, value: 7 }
             ]
         });
         if (result === null) return;
+
+        if (!result.url_destino && !result.contacto) {
+            notify('Agrega un enlace o un teléfono/WhatsApp de contacto.', 'error');
+            return;
+        }
 
         try {
             const payment = await apiFetch('/payments/sponsor-ad', {
@@ -147,6 +153,7 @@ export function initSponsorAdEntry() {
                     marca: result.marca,
                     texto: result.texto,
                     url_destino: result.url_destino || null,
+                    contacto: result.contacto || null,
                     dias: Math.trunc(result.dias)
                 })
             });
@@ -182,13 +189,17 @@ export async function loadAdBanner(containerId, categoryId = null) {
             <span class="ad-banner__tag">Patrocinado</span>
             <p class="ad-banner__brand">${escapeHtml(ad.marca)}</p>
             <p class="ad-banner__text">${escapeHtml(ad.texto)}</p>
+            ${ad.contacto ? `<a class="ad-banner__contact" href="tel:${escapeHtml(ad.contacto)}">📞 ${escapeHtml(ad.contacto)}</a>` : ''}
         </div>
     `;
 
     if (ad.url_destino) {
         const banner = container.querySelector('.ad-banner');
         banner.style.cursor = 'pointer';
-        banner.addEventListener('click', async () => {
+        banner.addEventListener('click', async (e) => {
+            // Si el clic fue sobre el enlace de teléfono, se deja que el
+            // navegador maneje tel: normalmente (no abrir además la URL).
+            if (e.target.closest('.ad-banner__contact')) return;
             try {
                 const { url_destino } = await apiFetch(`/ads/${ad.id}/click`, { method: 'POST' });
                 if (url_destino) window.open(url_destino, '_blank', 'noopener');
