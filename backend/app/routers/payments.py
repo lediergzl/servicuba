@@ -114,12 +114,18 @@ def request_sponsor_ad(
 ):
     if body.dias < 1 or body.dias > 90:
         raise HTTPException(status_code=400, detail="La duración debe ser entre 1 y 90 días")
+    if not body.url_destino and not body.contacto:
+        raise HTTPException(
+            status_code=400,
+            detail="Agrega un enlace o un teléfono/WhatsApp de contacto para que la gente pueda comunicarse.",
+        )
 
     monto = round(PRECIO_ANUNCIO_POR_DIA * body.dias, 2)
     detalle = {
         "marca": body.marca,
         "texto": body.texto,
         "url_destino": body.url_destino,
+        "contacto": body.contacto,
         "categoria_id": body.categoria_id,
         "dias": body.dias,
     }
@@ -199,6 +205,7 @@ def confirm_payment(
             marca=detalle.get("marca", "—"),
             texto=detalle.get("texto", ""),
             url_destino=detalle.get("url_destino"),
+            contacto=detalle.get("contacto"),
             categoria_id=detalle.get("categoria_id"),
             activo=True,
             fecha_inicio=datetime.utcnow(),

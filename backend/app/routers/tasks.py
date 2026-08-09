@@ -7,7 +7,7 @@ from geoalchemy2.functions import ST_DWithin, ST_Distance, ST_SetSRID, ST_MakePo
 from ..database import get_db
 from ..models.task import Task, TaskStatus
 from ..models.user import User
-from ..schemas.task import TaskCreate, TaskResponse
+from ..schemas.task import TaskCreate, TaskUpdate, TaskResponse
 from ..services.auth import get_current_user
 from ..services.plans import is_premium_active, PLAN_GRATIS_RADIO_MAX_KM, PLAN_PREMIUM_RADIO_MAX_KM
 from uuid import UUID
@@ -165,6 +165,57 @@ def get_task(task_id: UUID, db: Session = Depends(get_db)):
     if not task:
         raise HTTPException(status_code=404, detail="Tarea no encontrada")
     return task
+
+@router.put("/{task_id}", response_model=TaskResponse)
+def update_task(
+    task_id: UUID,
+    payload: TaskUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    # Antes no existía ninguna forma de editar una tarea ya creada —
+    # cualquier error de tipeo (precio, descripción) quedaba fijo para
+    # siempre. Sólo se permite mientras está "activa": una vez asignada,
+    # el trabajador ya aceptó en base a esos datos.
+    task = db.query(Task).filter(Task.id == task_id).first()
+    if not task:
+        raise HTTPException(status_code=404, detail="Tarea no encontrada")
+    if task.cliente_id != current_user.id:
+        raise HTTPException(status_code=403, detail="No eres el cliente de esta tarea")
+    if task.estado != TaskStatus.ACTIVA:
+        raise HTTPException(status_code=400, detail="Sólo se puede editar una tarea mientras está activa (sin trabajador asignado)")
+
+    data = payload.model_dump(exclude_unset=True)
+    for field, value in data.items():
+        setattr(task, field, value)
+
+    db.commit()
+    db.refresh(task)
+    return task
+
+@router.delete("/{task_id}")
+def delete_task(
+    task_id: UUID,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    # Antes no existía ninguna forma de eliminar/cancelar una tarea. Es un
+    # borrado lógico (CANCELADA), no un DELETE real: applications y
+    # messages tienen FK a tasks.id, así que borrarla de la tabla
+    # rompería ese historial (o directamente fallaría por la FK).
+    task = db.query(Task).filter(Task.id == task_id).first()
+    if not task:
+        raise HTTPException(status_code=404, detail="Tarea no encontrada")
+    if task.cliente_id != current_user.id:
+        raise HTTPException(status_code=403, detail="No eres el cliente de esta tarea")
+    if task.estado == TaskStatus.COMPLETADA:
+        raise HTTPException(status_code=400, detail="No se puede cancelar una tarea ya completada")
+    if task.estado == TaskStatus.CANCELADA:
+        raise HTTPException(status_code=400, detail="Esta tarea ya está cancelada")
+
+    task.estado = TaskStatus.CANCELADA
+    db.commit()
+    return {"message": "Tarea cancelada correctamente"}
 
 @router.post("/{task_id}/complete", response_model=TaskResponse)
 def complete_task(
