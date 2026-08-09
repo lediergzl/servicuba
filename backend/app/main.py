@@ -62,6 +62,12 @@ with engine.connect() as conn:
     conn.execute(text(
         "ALTER TABLE tasks ADD COLUMN IF NOT EXISTS destacada_hasta TIMESTAMP"
     ))
+    # Contacto (teléfono/WhatsApp) del anunciante — antes el banner de
+    # anuncio sólo mostraba un enlace si había url_destino; un negocio sin
+    # sitio web quedaba sin ninguna forma de que lo contactaran.
+    conn.execute(text(
+        "ALTER TABLE ads ADD COLUMN IF NOT EXISTS contacto VARCHAR(50)"
+    ))
     conn.commit()
 
 # Categorías por defecto: el frontend (regCategoria / filtroCategoria /
