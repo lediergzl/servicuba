@@ -4,7 +4,7 @@
 // byte a byte, un deploy que sólo tocara tasks.js/core.js/etc. nunca
 // disparaba 'install' — el navegador seguía sirviendo los JS viejos desde
 // caché indefinidamente, aunque el servidor ya tuviera el código nuevo.
-const CACHE_VERSION = 'v4';
+const CACHE_VERSION = 'v5';
 const CACHE_NAME = `servicuba-${CACHE_VERSION}`;
 
 const urlsToCache = [
