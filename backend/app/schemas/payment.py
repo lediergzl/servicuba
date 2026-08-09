@@ -8,6 +8,7 @@ class SponsorAdRequest(BaseModel):
     marca: str
     texto: str
     url_destino: Optional[str] = None
+    contacto: Optional[str] = None
     categoria_id: Optional[int] = None
     dias: int = 7
 
