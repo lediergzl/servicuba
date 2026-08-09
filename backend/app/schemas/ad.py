@@ -18,6 +18,3 @@ class AdResponse(BaseModel):
     clics: int
     payment_id: Optional[UUID] = None
     created_at: datetime
-
-    class Config:
-        from_attributes = True
