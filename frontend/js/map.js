@@ -1,6 +1,24 @@
+import { apiFetch, notify } from './core.js';
+
 let map = null;
 let marker = null;
 let taskMarkers = [];
+
+// Icono propio (azul, por defecto de Leaflet) para "Tu ubicación" vs. un
+// icono distinto (dorado, el acento de la marca) para las tareas — antes
+// ambos usaban el mismo icono azul por defecto de Leaflet, así que si una
+// tarea estaba muy cerca (o exactamente en el mismo punto, ej. una tarea
+// de prueba creada desde la misma posición desde la que se navega), su
+// marcador quedaba tapado exactamente debajo del de "Tu ubicación" y
+// parecía que las tareas "no aparecían" en el mapa.
+const taskIcon = L.icon({
+    iconUrl: 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-gold.png',
+    shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/images/marker-shadow.png',
+    iconSize: [25, 41],
+    iconAnchor: [12, 41],
+    popupAnchor: [1, -34],
+    shadowSize: [41, 41]
+});
 
 function clearTaskMarkers() {
     taskMarkers.forEach(m => map.removeLayer(m));
@@ -17,7 +35,16 @@ export function initMap() {
                 L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
                     attribution: '© OpenStreetMap'
                 }).addTo(map);
+                // El mapa se crea mientras el contenedor recién se hizo
+                // visible — en ese primer frame Leaflet puede medir mal
+                // el tamaño del contenedor y renderizar los tiles a medias
+                // o desalineados. invalidateSize() fuerza un recálculo una
+                // vez que el layout ya se asentó.
+                setTimeout(() => map.invalidateSize(), 0);
+            } else {
+                setTimeout(() => map.invalidateSize(), 0);
             }
+
             const token = localStorage.getItem('token');
             if (!token) return;
             navigator.geolocation.getCurrentPosition(
@@ -34,22 +61,31 @@ export function initMap() {
                     const params = new URLSearchParams({ lat, lng, radius_km: radius });
                     if (category) params.set('category_id', category);
 
-                    fetch(`/api/tasks/nearby?${params.toString()}`, {
-                        headers: { 'Authorization': `Bearer ${token}` }
-                    })
-                    .then(res => res.json())
-                    .then(tasks => {
-                        clearTaskMarkers();
-                        tasks.forEach(t => {
-                            if (t.lat == null || t.lng == null) return;
-                            const taskMarker = L.marker([t.lat, t.lng]).addTo(map)
-                                .bindPopup(
-                                    `<strong>${t.destacada ? '★ ' : ''}${escapeHtmlLocal(t.titulo)}</strong><br>`
-                                    + `$${escapeHtmlLocal(String(t.precio ?? 0))} · ${escapeHtmlLocal(String(t.distancia_km))} km`
-                                );
-                            taskMarkers.push(taskMarker);
+                    // apiFetch (en vez de un fetch crudo) da manejo de
+                    // errores consistente con el resto de la app: revisa
+                    // res.ok, extrae el mensaje de error del backend y
+                    // maneja el 401 de forma centralizada. Antes, un fetch
+                    // sin .catch() ni chequeo de res.ok fallaba en
+                    // silencio ante cualquier error — no aparecía ningún
+                    // aviso y el mapa se quedaba sin marcadores de tareas
+                    // sin ninguna pista de por qué.
+                    apiFetch(`/tasks/nearby?${params.toString()}`)
+                        .then(tasks => {
+                            clearTaskMarkers();
+                            if (!tasks || !tasks.length) return;
+                            tasks.forEach(t => {
+                                if (t.lat == null || t.lng == null) return;
+                                const taskMarker = L.marker([t.lat, t.lng], { icon: taskIcon }).addTo(map)
+                                    .bindPopup(
+                                        `<strong>${t.destacada ? '★ ' : ''}${escapeHtmlLocal(t.titulo)}</strong><br>`
+                                        + `$${escapeHtmlLocal(String(t.precio ?? 0))} · ${escapeHtmlLocal(String(t.distancia_km))} km`
+                                    );
+                                taskMarkers.push(taskMarker);
+                            });
+                        })
+                        .catch(err => {
+                            notify(`No se pudieron cargar las tareas en el mapa: ${err.message}`, 'error');
                         });
-                    });
                 },
                 () => alert('Activa el GPS para ver el mapa.')
             );
