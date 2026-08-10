@@ -9,11 +9,16 @@ export let currentUser = null;
 export function initAuth() {
     const registerForm = document.getElementById('registerForm');
     const loginForm = document.getElementById('loginForm');
-    const regRol = document.getElementById('regRol');
+    const regEsTrabajador = document.getElementById('regEsTrabajador');
 
-    if (regRol) {
-        regRol.addEventListener('change', (e) => {
-            const show = e.target.value === 'trabajador';
+    // Antes esto era un <select> de rol fijo (cliente/trabajador). Ahora
+    // toda cuenta es cliente por defecto (es_cliente=true siempre en el
+    // backend) y este checkbox opcional activa ADEMÁS el perfil de
+    // trabajador desde el registro — se puede activar después igual,
+    // desde el perfil, sin este paso.
+    if (regEsTrabajador) {
+        regEsTrabajador.addEventListener('change', (e) => {
+            const show = e.target.checked;
             document.getElementById('categoriaField').classList.toggle('hidden', !show);
             document.getElementById('ubicacionField').classList.toggle('hidden', !show);
         });
@@ -24,12 +29,16 @@ export function initAuth() {
             e.preventDefault();
             const submitBtn = registerForm.querySelector('button[type="submit"]');
 
+            const esTrabajador = document.getElementById('regEsTrabajador')?.checked || false;
+
             const data = {
                 nombre: document.getElementById('regNombre').value,
                 telefono: document.getElementById('regTelefono').value,
                 password: document.getElementById('regPassword').value,
-                rol: document.getElementById('regRol').value,
-                categoria_id: parseInt(document.getElementById('regCategoria')?.value || 0) || null,
+                es_trabajador: esTrabajador,
+                categoria_id: esTrabajador
+                    ? (parseInt(document.getElementById('regCategoria')?.value || 0) || null)
+                    : null,
                 municipio: document.getElementById('regMunicipio')?.value || null,
                 zona: document.getElementById('regZona')?.value || null,
                 lat: regLastLat,

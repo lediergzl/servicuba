@@ -39,7 +39,11 @@ export async function renderPremiumSection() {
         return;
     }
 
-    if (user.rol !== 'trabajador') {
+    // Antes: user.rol !== 'trabajador' (rol fijo). Con la dualidad de
+    // roles, un usuario puede ser cliente Y trabajador a la vez — lo que
+    // importa acá es si tiene el perfil de trabajador activo, no si
+    // "es" exclusivamente trabajador.
+    if (!user.es_trabajador) {
         el.innerHTML = '';
         return;
     }
@@ -104,8 +108,8 @@ export async function requestFeatureTask(taskId) {
         : 'precio no disponible por ahora';
 
     const ok = await showConfirm({
-        title: 'Destacar esta tarea',
-        message: `Tu tarea aparecerá primero en los resultados de los trabajadores cercanos. Costo: ${precioTexto}.`,
+        title: 'Destacar esta publicación',
+        message: `Aparecerá primero en los resultados de búsqueda cercana. Costo: ${precioTexto}.`,
         confirmLabel: 'Solicitar'
     });
     if (!ok) return;
@@ -197,8 +201,6 @@ export async function loadAdBanner(containerId, categoryId = null) {
         const banner = container.querySelector('.ad-banner');
         banner.style.cursor = 'pointer';
         banner.addEventListener('click', async (e) => {
-            // Si el clic fue sobre el enlace de teléfono, se deja que el
-            // navegador maneje tel: normalmente (no abrir además la URL).
             if (e.target.closest('.ad-banner__contact')) return;
             try {
                 const { url_destino } = await apiFetch(`/ads/${ad.id}/click`, { method: 'POST' });

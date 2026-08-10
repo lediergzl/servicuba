@@ -1,4 +1,4 @@
-import { apiFetch } from './core.js';
+import { apiFetch, notify, showFormModal, getGeolocation } from './core.js';
 import { initAuth, showLanding, showRegister, showLogin, logout } from './auth.js';
 import { initTasks, loadCategories, showDashboardCliente, showDashboardTrabajador, switchView } from './tasks.js';
 import { initMap } from './map.js';
@@ -8,20 +8,36 @@ import { initVerification, refreshVerificationBanner } from './verification.js';
 import { renderPremiumSection, initSponsorAdEntry, loadAdBanner } from './monetization.js';
 import { checkAndShowAdminEntry, initAdminPanel, loadPendingPayments } from './admin.js';
 
-let currentRole = null;
+// Dualidad de roles: reemplaza a la antigua variable `currentRole` (que
+// asumía un rol fijo). currentModo es cuál panel se está mostrando
+// ahora mismo; isCliente/isTrabajador reflejan qué perfiles tiene
+// ACTIVOS el usuario (pueden ser ambos true a la vez).
+let currentModo = 'cliente';
+let isCliente = true;
+let isTrabajador = false;
 
 async function bootstrap() {
     const token = localStorage.getItem('token');
     document.getElementById('user-menu-guest')?.classList.toggle('hidden', !!token);
     document.getElementById('user-menu-auth')?.classList.toggle('hidden', !token);
     document.getElementById('bottomNav')?.classList.toggle('hidden', !token);
+    document.getElementById('modoSwitch')?.classList.toggle('hidden', !token);
 
     if (token) {
         try {
             const user = await apiFetch('/users/profile');
-            currentRole = user.rol;
+            isCliente = user.es_cliente;
+            isTrabajador = user.es_trabajador;
+            // modo_activo se persiste en el servidor (ver PUT /users/modo-activo)
+            // para que la app recuerde el último panel elegido entre
+            // dispositivos/sesiones. Si por algún motivo apunta a un modo
+            // que el usuario ya no tiene activo, se cae a "cliente" (que
+            // siempre está disponible).
+            currentModo = (user.modo_activo === 'trabajador' && isTrabajador) ? 'trabajador' : 'cliente';
             setCurrentUserId(user.id);
-            if (user.rol === 'cliente') {
+            updateModeSwitchUI();
+
+            if (currentModo === 'cliente') {
                 showDashboardCliente();
             } else {
                 showDashboardTrabajador();
@@ -32,12 +48,7 @@ async function bootstrap() {
             checkAndShowAdminEntry();
             // Se carga acá (además de al entrar a la pestaña "Mensajes")
             // para que el badge de no-leídos del bottom nav ya esté
-            // correcto desde que abres la app — antes sólo se calculaba
-            // al visitar Mensajes manualmente, así que un chat nuevo era
-            // invisible ("ninguna burbuja") hasta que uno entraba ahí por
-            // curiosidad. Escribe en el contenedor de Mensajes aunque
-            // esté oculto — es inofensivo y queda ya listo cuando el
-            // usuario abra esa pestaña.
+            // correcto desde que abres la app.
             loadConversations();
         } catch {
             showLanding();
@@ -47,12 +58,133 @@ async function bootstrap() {
     }
 }
 
+// ---------- Selector de modo (Cliente / Trabajador) ----------
+
+function updateModeSwitchUI() {
+    document.querySelectorAll('.mode-switch__btn').forEach(btn => {
+        btn.classList.toggle('is-active', btn.dataset.modo === currentModo);
+    });
+}
+
+function initModeSwitch() {
+    document.getElementById('modoSwitch')?.addEventListener('click', async (e) => {
+        const btn = e.target.closest('.mode-switch__btn');
+        if (!btn || btn.classList.contains('is-active')) return;
+        await switchModo(btn.dataset.modo);
+    });
+}
+
+async function switchModo(modo) {
+    if (modo === currentModo) return;
+
+    // Tocar "Trabajador" sin tener ese perfil activo todavía abre el
+    // formulario de activación en vez de fallar con un 403 silencioso.
+    if (modo === 'trabajador' && !isTrabajador) {
+        const activated = await promptActivateWorker();
+        if (!activated) return;
+        isTrabajador = true;
+    }
+
+    try {
+        await apiFetch('/users/modo-activo', {
+            method: 'PUT',
+            body: JSON.stringify({ modo })
+        });
+    } catch (err) {
+        notify(`Error: ${err.message}`, 'error');
+        return;
+    }
+
+    currentModo = modo;
+    updateModeSwitchUI();
+
+    if (modo === 'cliente') {
+        showDashboardCliente();
+    } else {
+        showDashboardTrabajador();
+        loadAdBanner('adBannerTrabajador');
+    }
+    document.querySelectorAll('.bottom-nav__item').forEach(el => {
+        el.classList.toggle('is-active', el.dataset.view === 'dashboardCliente');
+    });
+}
+
+// Formulario para activar el perfil de trabajador — lo usan tanto el
+// switch de modo (si se toca "Trabajador" sin tenerlo activo) como el
+// botón dedicado en el perfil.
+async function promptActivateWorker() {
+    let categorias;
+    try {
+        categorias = await apiFetch('/categories');
+    } catch (err) {
+        notify(`No se pudieron cargar las categorías: ${err.message}`, 'error');
+        return false;
+    }
+    if (!categorias.length) {
+        notify('No hay categorías disponibles todavía.', 'error');
+        return false;
+    }
+
+    const categoryOptions = categorias.map(c => ({
+        value: String(c.id),
+        label: `${c.icono ? c.icono + ' ' : ''}${c.nombre}`
+    }));
+
+    const result = await showFormModal({
+        title: 'Activar modo Trabajador',
+        confirmLabel: 'Activar',
+        fields: [
+            { name: 'categoria_id', label: 'Tu oficio', type: 'select', required: true, options: categoryOptions },
+            { name: 'descripcion_trabajador', label: 'Descripción (opcional)', type: 'textarea', placeholder: 'Ej: Electricista con 10 años de experiencia...' },
+            { name: 'precio_hora', label: 'Precio por hora (opcional)', type: 'number', min: 0, step: '0.01' },
+            { name: 'municipio', label: 'Municipio', type: 'text' },
+            { name: 'zona', label: 'Zona / Consejo popular', type: 'text' },
+        ]
+    });
+    if (result === null) return false;
+
+    const categoria = parseInt(result.categoria_id, 10);
+    if (!categorias.some(c => c.id === categoria)) {
+        notify('Selecciona un oficio válido.', 'error');
+        return false;
+    }
+
+    let lat = null;
+    let lng = null;
+    try {
+        const pos = await getGeolocation();
+        lat = pos.coords.latitude;
+        lng = pos.coords.longitude;
+    } catch {
+        // Sin GPS igual se puede activar el perfil.
+    }
+
+    try {
+        await apiFetch('/users/activar-trabajador', {
+            method: 'PUT',
+            body: JSON.stringify({
+                categoria_id: categoria,
+                descripcion_trabajador: result.descripcion_trabajador || null,
+                precio_hora: result.precio_hora || null,
+                municipio: result.municipio || null,
+                zona: result.zona || null,
+                lat, lng
+            })
+        });
+        notify('Perfil de trabajador activado.', 'success');
+        return true;
+    } catch (err) {
+        notify(`Error: ${err.message}`, 'error');
+        return false;
+    }
+}
+
 function initBottomNav() {
     document.querySelectorAll('.bottom-nav__item').forEach(btn => {
         btn.addEventListener('click', () => {
             const view = btn.dataset.view;
             if (view === 'dashboardCliente' || view === 'dashboardTrabajador') {
-                if (currentRole === 'cliente') showDashboardCliente();
+                if (currentModo === 'cliente') showDashboardCliente();
                 else showDashboardTrabajador();
             } else if (view === 'mensajes') {
                 switchView('mensajesView');
@@ -96,32 +228,55 @@ function renderStarRating(rating) {
 
 async function loadProfile() {
     const el = document.getElementById('perfilContenido');
+    const workerSection = document.getElementById('workerActivationSection');
     if (!el) return;
     el.innerHTML = '<p class="empty-state">Cargando…</p>';
     try {
         const user = await apiFetch('/users/profile');
-        const esTrabajador = user.rol === 'trabajador';
+        isCliente = user.es_cliente;
+        isTrabajador = user.es_trabajador;
 
-        // Antes el perfil se veía IDÉNTICO para cliente y trabajador
-        // (mismo nombre/rol/rating/teléfono, sin ningún dato propio del
-        // rol). Se agregan datos específicos: para el trabajador, su
-        // oficio/categoría; para el cliente, un resumen de sus tareas
-        // publicadas — así ambos perfiles se distinguen a simple vista.
         let roleDetail = '';
-        if (esTrabajador && user.categoria_nombre) {
+        if (user.es_trabajador && user.categoria_nombre) {
             roleDetail = `<p class="profile-card__meta">${user.categoria_icono ? user.categoria_icono + ' ' : ''}${user.categoria_nombre}</p>`;
         }
+
+        const badges = [
+            user.es_cliente ? '<span class="chip chip--estado-activa">Cliente</span>' : '',
+            user.es_trabajador ? '<span class="chip chip--estado-activa">Trabajador</span>' : '',
+        ].filter(Boolean).join(' ');
 
         el.innerHTML = `
             <div class="profile-card">
                 <div class="profile-card__avatar">${user.nombre.charAt(0).toUpperCase()}</div>
                 <h2 class="profile-card__name">${user.nombre} ${user.verificado ? '<span class="verified-stamp" title="Cuenta verificada">✓ VERIFICADO</span>' : ''}</h2>
-                <p class="profile-card__meta">${user.rol === 'cliente' ? 'Cliente' : 'Trabajador'}</p>
+                <p class="profile-card__meta">${badges}</p>
                 ${roleDetail}
                 <p class="profile-card__meta">${renderStarRating(user.rating)} <span class="mono">${(user.rating ?? 0).toFixed(1)}</span></p>
                 <p class="profile-card__meta mono">${user.telefono}</p>
             </div>
         `;
+
+        if (workerSection) {
+            if (!user.es_trabajador) {
+                workerSection.innerHTML = `
+                    <div class="worker-status-card">
+                        <p class="task-card__title">¿También ofreces servicios?</p>
+                        <p class="task-card__meta" style="margin:6px 0 10px">Activa tu perfil de trabajador para aparecer en las búsquedas, postularte a tareas cercanas y publicar tus propios servicios.</p>
+                        <button id="activateWorkerBtn" class="btn btn-accent btn-block btn-sm">Activar modo Trabajador</button>
+                    </div>
+                `;
+                document.getElementById('activateWorkerBtn')?.addEventListener('click', async () => {
+                    const activated = await promptActivateWorker();
+                    if (activated) {
+                        isTrabajador = true;
+                        await loadProfile();
+                    }
+                });
+            } else {
+                workerSection.innerHTML = '';
+            }
+        }
     } catch (err) {
         el.innerHTML = `<p class="empty-state">Error: ${err.message}</p>`;
     }
@@ -139,6 +294,7 @@ document.addEventListener('DOMContentLoaded', () => {
     initChat();
     initVerification();
     initBottomNav();
+    initModeSwitch();
     initSponsorAdEntry();
     initAdminPanel();
 
@@ -150,6 +306,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     document.addEventListener('auth:expired', () => {
         document.getElementById('bottomNav')?.classList.add('hidden');
+        document.getElementById('modoSwitch')?.classList.add('hidden');
         showLanding();
     });
 

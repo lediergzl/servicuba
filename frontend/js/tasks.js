@@ -1,5 +1,9 @@
 // ============================================================
 // Módulo de Tareas — Cliente / Trabajador
+// Incluye el marketplace de OFERTAS (trabajador publica un servicio,
+// cliente lo busca y solicita) reutilizando la misma infraestructura de
+// postulaciones/chat/aceptar que las NECESIDADES — ver la nota grande
+// en backend/app/routers/tasks.py sobre por qué casi todo es genérico.
 // ============================================================
 import {
     apiFetch, notify, showFormModal, showConfirm, escapeHtml,
@@ -8,30 +12,27 @@ import {
 import { openChatForTask } from './chat.js';
 import { requestFeatureTask } from './monetization.js';
 
-// Evita que dos cargas de "tareas cercanas" se pisen entre sí.
+// Evita que dos cargas de "cercanas" (tareas u ofertas) se pisen entre sí.
 let nearbyTasksAbortController = null;
+let nearbyOfertasAbortController = null;
 
 // Categorías cargadas por loadCategories(); se reutilizan para construir
-// el selector de "Nueva tarea" sin volver a pedirlas al backend.
+// los selectores de "Nueva tarea"/"Publicar servicio" sin volver a
+// pedirlas al backend.
 let loadedCategories = [];
 
-// IDs de tareas a las que YA se postuló en esta sesión (del lado
-// trabajador). apply_to_task no cambia el estado de la tarea (sigue
-// "activa" hasta que el cliente acepte a alguien), así que al recargar
-// la lista la tarjeta se veía idéntica y parecía que el clic no había
-// hecho nada. Se usa esto para mostrar "Ya postulado" en vez de
-// "Postular" sin tener que exponer un endpoint nuevo de "mis
-// postulaciones" para esto.
+// IDs de publicaciones (tareas U OFERTAS) a las que YA se postuló/
+// solicitó en esta sesión. Un solo Set para ambas, porque
+// GET /applications/mine ya devuelve ids de ambos tipos sin distinguir
+// — ver nota en routers/applications.py.
 const appliedTaskIds = new Set();
 
 // ---------- Categorías ----------
 
 // GET /categories ahora trae Cache-Control: max-age=3600 (ver
 // routers/categories.py) para evitarle a la app ese round-trip en cada
-// carga en conexiones lentas. Eso significa que, si el admin acaba de
-// crear o pausar una categoría, un fetch normal podría devolver la copia
-// vieja del navegador hasta por una hora. forceRefresh=true (usado sólo
-// desde admin.js justo después de esas dos acciones) le pide al
+// carga en conexiones lentas. forceRefresh=true (usado sólo desde
+// admin.js justo después de crear/pausar una categoría) le pide al
 // navegador que ignore esa caché y vaya sí o sí a la red.
 export async function loadCategories(forceRefresh = false) {
     let cats;
@@ -44,7 +45,10 @@ export async function loadCategories(forceRefresh = false) {
 
     loadedCategories = cats;
 
-    const selects = ['regCategoria', 'filtroCategoria'];
+    // filtroCategoriaOfertas: filtro de "Ofertas cercanas" en el
+    // dashboard del cliente — mismo patrón que filtroCategoria
+    // (trabajador) y regCategoria (registro).
+    const selects = ['regCategoria', 'filtroCategoria', 'filtroCategoriaOfertas'];
     selects.forEach(id => {
         const sel = document.getElementById(id);
         if (!sel) return;
@@ -52,7 +56,7 @@ export async function loadCategories(forceRefresh = false) {
         sel.innerHTML = '';
         const defaultOpt = document.createElement('option');
         defaultOpt.value = '';
-        defaultOpt.textContent = id === 'filtroCategoria' ? 'Todas las categorías' : 'Selecciona tu oficio';
+        defaultOpt.textContent = id === 'regCategoria' ? 'Selecciona tu oficio' : 'Todas las categorías';
         sel.appendChild(defaultOpt);
 
         cats.forEach(c => {
@@ -64,7 +68,7 @@ export async function loadCategories(forceRefresh = false) {
     });
 }
 
-// ---------- Tareas cercanas (trabajador) ----------
+// ---------- Tareas cercanas (trabajador busca necesidades) ----------
 
 export async function loadNearbyTasks() {
     const token = localStorage.getItem('token');
@@ -76,10 +80,6 @@ export async function loadNearbyTasks() {
     const container = document.getElementById('listaTareas');
     if (container) container.innerHTML = renderSkeletonCards(3);
 
-    // Trae las postulaciones reales del trabajador para que "Ya postulado"
-    // sobreviva a un refresh de página (antes sólo vivía en el Set en
-    // memoria, así que tras recargar el botón volvía a mostrar "Postular"
-    // para tareas ya postuladas y el backend rechazaba el reintento con 400).
     try {
         const mine = await apiFetch('/applications/mine');
         mine.forEach(id => appliedTaskIds.add(String(id)));
@@ -165,7 +165,6 @@ function renderNearbyTasks(tasks) {
     });
 }
 
-// Un único listener delegado en el contenedor (evita fugas al re-renderizar).
 function setupTaskListDelegation() {
     const container = document.getElementById('listaTareas');
     if (!container || container.dataset.delegated) return;
@@ -174,26 +173,149 @@ function setupTaskListDelegation() {
     container.addEventListener('click', (e) => {
         const btn = e.target.closest('button[data-id]');
         if (!btn || btn.disabled) return;
-        applyToTask(btn.dataset.id, btn);
+        applyToTask(btn.dataset.id, btn, 'necesidad');
     });
 }
 
-async function applyToTask(taskId, buttonEl) {
+function setupNearbyFiltersListeners() {
+    const radioSel = document.getElementById('filtroRadio');
+    const catSel = document.getElementById('filtroCategoria');
+    [radioSel, catSel].forEach(sel => {
+        if (!sel || sel.dataset.listenerAttached) return;
+        sel.dataset.listenerAttached = 'true';
+        sel.addEventListener('change', () => loadNearbyTasks());
+    });
+}
+
+// ---------- Ofertas cercanas (cliente busca servicios) ----------
+
+export async function loadNearbyOfertas() {
+    const token = localStorage.getItem('token');
+    if (!token) return;
+
+    const container = document.getElementById('listaOfertasCercanas');
+    if (container) container.innerHTML = renderSkeletonCards(3);
+
+    try {
+        const mine = await apiFetch('/applications/mine');
+        mine.forEach(id => appliedTaskIds.add(String(id)));
+    } catch {
+        // fallo silencioso
+    }
+
+    let pos;
+    try {
+        pos = await getGeolocation();
+    } catch (err) {
+        notify(geolocationErrorMessage(err), 'error');
+        if (container) container.innerHTML = '<p class="empty-state">No se pudo obtener tu ubicación.</p>';
+        return;
+    }
+
+    const lat = pos.coords.latitude;
+    const lng = pos.coords.longitude;
+    const radius = document.getElementById('filtroRadioOfertas')?.value || 3;
+    const category = document.getElementById('filtroCategoriaOfertas')?.value || '';
+
+    const params = new URLSearchParams({ lat, lng, radius_km: radius });
+    if (category) params.set('category_id', category);
+
+    if (nearbyOfertasAbortController) nearbyOfertasAbortController.abort();
+    nearbyOfertasAbortController = new AbortController();
+
+    let ofertas;
+    try {
+        ofertas = await apiFetch(`/tasks/ofertas/nearby?${params.toString()}`, {
+            signal: nearbyOfertasAbortController.signal
+        });
+    } catch (err) {
+        if (err.name === 'AbortError') return;
+        notify(`No se pudieron cargar las ofertas: ${err.message}`, 'error');
+        if (container) container.innerHTML = '<p class="empty-state">Error al cargar ofertas.</p>';
+        return;
+    }
+
+    renderNearbyOfertas(ofertas);
+}
+
+function renderNearbyOfertas(ofertas) {
+    const container = document.getElementById('listaOfertasCercanas');
+    if (!container) return;
+
+    container.innerHTML = '';
+
+    if (!ofertas || !ofertas.length) {
+        container.innerHTML = '<p class="empty-state">No hay servicios ofrecidos cerca. Ajusta el radio o la categoría.</p>';
+        return;
+    }
+
+    ofertas.forEach(o => {
+        const yaSolicitado = appliedTaskIds.has(String(o.id));
+        const card = document.createElement('div');
+        card.className = o.destacada ? 'task-card task-card--featured' : 'task-card';
+        card.innerHTML = `
+            <div class="task-card__row">
+                <h3 class="task-card__title">${o.destacada ? '★ ' : ''}${escapeHtml(o.titulo)}</h3>
+                <span class="task-card__price">$${escapeHtml(String(o.precio ?? 0))}</span>
+            </div>
+            ${o.descripcion ? `<p class="task-card__meta">${escapeHtml(o.descripcion)}</p>` : ''}
+            <p class="task-card__meta">
+                <span class="chip">${escapeHtml(String(o.distancia_km))} km</span>
+                ${yaSolicitado ? '<span class="chip chip--estado-asignada">Ya solicitado</span>' : ''}
+            </p>
+            <button class="btn ${yaSolicitado ? 'btn-secondary' : 'btn-primary'} btn-block" data-id="${escapeHtml(String(o.id))}" ${yaSolicitado ? 'disabled' : ''}>
+                ${yaSolicitado ? 'Solicitud enviada ✓' : 'Solicitar'}
+            </button>
+        `;
+        container.appendChild(card);
+    });
+}
+
+function setupOfertaListDelegation() {
+    const container = document.getElementById('listaOfertasCercanas');
+    if (!container || container.dataset.delegated) return;
+    container.dataset.delegated = 'true';
+
+    container.addEventListener('click', (e) => {
+        const btn = e.target.closest('button[data-id]');
+        if (!btn || btn.disabled) return;
+        applyToTask(btn.dataset.id, btn, 'oferta');
+    });
+}
+
+function setupOfertaFiltersListeners() {
+    const radioSel = document.getElementById('filtroRadioOfertas');
+    const catSel = document.getElementById('filtroCategoriaOfertas');
+    [radioSel, catSel].forEach(sel => {
+        if (!sel || sel.dataset.listenerAttached) return;
+        sel.dataset.listenerAttached = 'true';
+        sel.addEventListener('change', () => loadNearbyOfertas());
+    });
+}
+
+// ---------- Postularse / solicitar (genérico para ambas direcciones) ----------
+// POST /applications/{id}/apply ya distingue internamente si es una
+// necesidad (postula un trabajador) o una oferta (solicita un cliente)
+// según el tipo de la publicación — acá sólo cambia el texto mostrado.
+
+async function applyToTask(taskId, buttonEl, tipo = 'necesidad') {
     const token = localStorage.getItem('token');
     if (!token) {
         notify('Inicia sesión primero.', 'error');
         return;
     }
 
+    const esOferta = tipo === 'oferta';
+
     const result = await showFormModal({
-        title: 'Postularte a esta tarea',
+        title: esOferta ? 'Solicitar este servicio' : 'Postularte a esta tarea',
         confirmLabel: 'Enviar',
         fields: [
             {
                 name: 'mensaje',
-                label: 'Mensaje para el cliente (opcional)',
+                label: esOferta ? 'Mensaje para el trabajador (opcional)' : 'Mensaje para el cliente (opcional)',
                 type: 'textarea',
-                placeholder: 'Ej: Tengo experiencia en este tipo de trabajos...'
+                placeholder: esOferta ? 'Ej: Necesito este servicio para el fin de semana...' : 'Ej: Tengo experiencia en este tipo de trabajos...'
             }
         ]
     });
@@ -211,22 +333,21 @@ async function applyToTask(taskId, buttonEl) {
             body: JSON.stringify({ mensaje: result.mensaje || '' })
         });
         appliedTaskIds.add(String(taskId));
-        notify('Postulación enviada correctamente.', 'success');
-        await loadNearbyTasks();
+        notify(esOferta ? 'Solicitud enviada correctamente.' : 'Postulación enviada correctamente.', 'success');
+        if (esOferta) await loadNearbyOfertas(); else await loadNearbyTasks();
     } catch (err) {
         notify(`Error: ${err.message}`, 'error');
-        if (err.message === 'Ya te has postulado a esta tarea') {
+        if (err.message === 'Ya hiciste esta solicitud') {
             // El backend tiene razón y nuestro estado local estaba
-            // desactualizado (p.ej. otra pestaña, o un caché de
-            // /applications/mine viejo) — lo corregimos en vez de dejar
-            // el botón en "Enviando…" para siempre.
+            // desactualizado (p.ej. otra pestaña) — lo corregimos en vez
+            // de dejar el botón en "Enviando…" para siempre.
             appliedTaskIds.add(String(taskId));
-            await loadNearbyTasks();
+            if (esOferta) await loadNearbyOfertas(); else await loadNearbyTasks();
             return;
         }
         if (buttonEl) {
             buttonEl.disabled = false;
-            buttonEl.textContent = 'Postular';
+            buttonEl.textContent = esOferta ? 'Solicitar' : 'Postular';
         }
     }
 }
@@ -235,6 +356,13 @@ async function applyToTask(taskId, buttonEl) {
 
 export function showDashboardCliente() {
     switchView('dashboardCliente');
+    setupClienteSubTabs();
+    // Siempre vuelve a "Mis tareas" al entrar — evita quedar mostrando
+    // el panel de ofertas con datos de una visita anterior.
+    document.querySelectorAll('.sub-tab[data-clientetab]').forEach(t =>
+        t.classList.toggle('is-active', t.dataset.clientetab === 'tareas'));
+    document.getElementById('misTareasPanel')?.classList.remove('hidden');
+    document.getElementById('ofertasCercanasPanel')?.classList.add('hidden');
     loadMyTasks();
 }
 
@@ -242,20 +370,48 @@ export function showDashboardTrabajador() {
     switchView('dashboardTrabajador');
     setupTaskListDelegation();
     setupNearbyFiltersListeners();
+    setupTrabajadorSubTabs();
+    document.querySelectorAll('.sub-tab[data-trabajadortab]').forEach(t =>
+        t.classList.toggle('is-active', t.dataset.trabajadortab === 'cercanas'));
+    document.getElementById('tareasCercanasPanel')?.classList.remove('hidden');
+    document.getElementById('misOfertasPanel')?.classList.add('hidden');
     loadNearbyTasks();
 }
 
-// Los <select> de radio/categoría no disparaban ninguna recarga: sus
-// valores sólo se leían dentro de loadNearbyTasks(), pero nada llamaba
-// a esa función al cambiarlos, así que el filtro parecía no hacer nada
-// hasta refrescar la página entera.
-function setupNearbyFiltersListeners() {
-    const radioSel = document.getElementById('filtroRadio');
-    const catSel = document.getElementById('filtroCategoria');
-    [radioSel, catSel].forEach(sel => {
-        if (!sel || sel.dataset.listenerAttached) return;
-        sel.dataset.listenerAttached = 'true';
-        sel.addEventListener('change', () => loadNearbyTasks());
+// Sub-pestañas dentro de cada dashboard — NO reutilizan la clase
+// .admin-tab a propósito (ver comentario en style.css: el listener de
+// admin.js está acoplado globalmente a esa clase).
+function setupClienteSubTabs() {
+    const tabs = document.querySelectorAll('.sub-tab[data-clientetab]');
+    if (!tabs.length || tabs[0].dataset.wired) return;
+    tabs.forEach(tab => {
+        tab.dataset.wired = 'true';
+        tab.addEventListener('click', () => {
+            tabs.forEach(t => t.classList.toggle('is-active', t === tab));
+            const showOfertas = tab.dataset.clientetab === 'ofertas';
+            document.getElementById('misTareasPanel')?.classList.toggle('hidden', showOfertas);
+            document.getElementById('ofertasCercanasPanel')?.classList.toggle('hidden', !showOfertas);
+            if (showOfertas) {
+                setupOfertaListDelegation();
+                setupOfertaFiltersListeners();
+                loadNearbyOfertas();
+            }
+        });
+    });
+}
+
+function setupTrabajadorSubTabs() {
+    const tabs = document.querySelectorAll('.sub-tab[data-trabajadortab]');
+    if (!tabs.length || tabs[0].dataset.wired) return;
+    tabs.forEach(tab => {
+        tab.dataset.wired = 'true';
+        tab.addEventListener('click', () => {
+            tabs.forEach(t => t.classList.toggle('is-active', t === tab));
+            const showOfertas = tab.dataset.trabajadortab === 'ofertas';
+            document.getElementById('tareasCercanasPanel')?.classList.toggle('hidden', showOfertas);
+            document.getElementById('misOfertasPanel')?.classList.toggle('hidden', !showOfertas);
+            if (showOfertas) loadMyOfertas();
+        });
     });
 }
 
@@ -268,12 +424,13 @@ export function switchView(viewId) {
     });
 }
 
+// ---------- Mis tareas (cliente) ----------
+
 // Última lista de "mis tareas" cargada — el listener delegado de
-// #misTareas se registra una sola vez (ver dataset.delegated más abajo),
-// así que si leyera el array `tasks` por closure quedaría atado a la
-// PRIMERA carga para siempre. Se guarda aquí y se refresca en cada
-// loadMyTasks() para que el listener siempre vea los datos actuales.
+// #misTareas se registra una sola vez, así que si leyera el array
+// `tasks` por closure quedaría atado a la PRIMERA carga para siempre.
 let myTasksCache = [];
+let myOfertasCache = [];
 
 const ESTADO_LABELS = {
     activa: 'Buscando trabajador',
@@ -358,13 +515,13 @@ async function loadMyTasks() {
                 await requestFeatureTask(taskId);
             } else if (btn.dataset.action === 'applications') {
                 const titulo = btn.closest('.task-card')?.querySelector('.task-card__title')?.textContent || '';
-                await viewApplications(taskId, titulo);
+                await viewApplications(taskId, titulo, loadMyTasks);
             } else if (btn.dataset.action === 'review') {
                 const t = myTasksCache.find(tt => String(tt.id) === String(taskId));
                 await leaveReview(taskId, t?.trabajador_id, t?.trabajador_nombre || 'el trabajador');
             } else if (btn.dataset.action === 'edit') {
                 const t = myTasksCache.find(tt => String(tt.id) === String(taskId));
-                await editTask(taskId, t);
+                await editTask(taskId, t, loadMyTasks);
             } else if (btn.dataset.action === 'cancel') {
                 const ok = await showConfirm({
                     title: 'Cancelar esta tarea',
@@ -399,9 +556,131 @@ async function loadMyTasks() {
     }
 }
 
-// ---------- Ver / aceptar postulaciones (cliente) ----------
+// ---------- Mis ofertas (trabajador) ----------
+// Mismas acciones que "Mis tareas" (ver solicitudes/chat/completar/
+// destacar/editar/cancelar), reutilizando los mismos endpoints
+// genéricos PUT/DELETE/POST /tasks/{id}/... — sólo cambia de dónde se
+// leen los datos (GET /tasks/ofertas/mine) y a quién se muestra en el
+// chat (el cliente que contrató, no un trabajador).
 
-async function viewApplications(taskId, tituloTarea) {
+async function loadMyOfertas() {
+    const token = localStorage.getItem('token');
+    if (!token) return;
+
+    const container = document.getElementById('misOfertas');
+    if (container) container.innerHTML = renderSkeletonCards(2);
+
+    let ofertas;
+    try {
+        ofertas = await apiFetch('/tasks/ofertas/mine');
+    } catch (err) {
+        if (container) container.innerHTML = `<p class="empty-state">Error: ${escapeHtml(err.message)}</p>`;
+        return;
+    }
+
+    if (!container) return;
+    container.innerHTML = '';
+    myOfertasCache = ofertas;
+
+    if (!ofertas.length) {
+        container.innerHTML = '<p class="empty-state">Todavía no publicaste ningún servicio. Toca "+ Publicar servicio" para empezar.</p>';
+        return;
+    }
+
+    ofertas.forEach(o => {
+        const card = document.createElement('div');
+        card.className = 'task-card';
+
+        const canChat = o.estado === 'asignada' || o.estado === 'en_proceso' || o.estado === 'completada';
+        const canComplete = o.estado === 'asignada' || o.estado === 'en_proceso';
+        const canFeature = o.estado === 'activa' && !o.destacada;
+        const canViewSolicitudes = o.estado === 'activa';
+        const canEdit = o.estado === 'activa';
+        const canCancel = o.estado === 'activa' || o.estado === 'asignada' || o.estado === 'en_proceso';
+
+        card.innerHTML = `
+            <div class="task-card__row">
+                <h3 class="task-card__title">${escapeHtml(o.titulo)}</h3>
+                <span class="task-card__price">$${escapeHtml(String(o.precio ?? 0))}</span>
+            </div>
+            <p class="task-card__meta">
+                <span class="chip chip--estado-${escapeHtml(o.estado)}">${escapeHtml(ESTADO_LABELS[o.estado] || o.estado)}</span>
+                ${o.destacada ? '<span class="chip" style="color:var(--copper);border-color:var(--copper)">★ Destacada</span>' : ''}
+            </p>
+            <div class="task-card__actions">
+                ${canViewSolicitudes ? `<button class="btn btn-accent btn-sm" data-action="solicitudes" data-id="${o.id}">Ver solicitudes</button>` : ''}
+                ${canChat ? `<button class="btn btn-secondary btn-sm" data-action="chat" data-id="${o.id}">
+                    <svg class="icon" viewBox="0 0 24 24"><path d="M4 5h16v11H9l-4 4V5Z"/></svg>
+                    Chat
+                </button>` : ''}
+                ${canComplete ? `<button class="btn btn-primary btn-sm" data-action="complete" data-id="${o.id}">Marcar completada</button>` : ''}
+                ${canFeature ? `<button class="btn btn-secondary btn-sm" data-action="feature" data-id="${o.id}">★ Destacar</button>` : ''}
+                ${canEdit ? `<button class="btn btn-secondary btn-sm" data-action="edit" data-id="${o.id}">Editar</button>` : ''}
+                ${canCancel ? `<button class="btn btn-ghost btn-sm" data-action="cancel" data-id="${o.id}" style="color:var(--brick)">Cancelar</button>` : ''}
+            </div>
+        `;
+        container.appendChild(card);
+    });
+
+    if (!container.dataset.delegated) {
+        container.dataset.delegated = 'true';
+        container.addEventListener('click', async (e) => {
+            const btn = e.target.closest('button[data-action]');
+            if (!btn) return;
+            const ofertaId = btn.dataset.id;
+            if (btn.dataset.action === 'chat') {
+                const o = myOfertasCache.find(oo => String(oo.id) === String(ofertaId));
+                openChatForTask(ofertaId, o?.titulo || '', o?.cliente_nombre || 'Cliente');
+            } else if (btn.dataset.action === 'feature') {
+                await requestFeatureTask(ofertaId);
+            } else if (btn.dataset.action === 'solicitudes') {
+                const titulo = btn.closest('.task-card')?.querySelector('.task-card__title')?.textContent || '';
+                await viewApplications(ofertaId, titulo, loadMyOfertas);
+            } else if (btn.dataset.action === 'edit') {
+                const o = myOfertasCache.find(oo => String(oo.id) === String(ofertaId));
+                await editTask(ofertaId, o, loadMyOfertas);
+            } else if (btn.dataset.action === 'cancel') {
+                const ok = await showConfirm({
+                    title: 'Cancelar este servicio',
+                    message: 'Los clientes que ya lo solicitaron dejarán de poder contratarlo. Esta acción no se puede deshacer.',
+                    confirmLabel: 'Sí, cancelar',
+                    danger: true
+                });
+                if (!ok) return;
+                try {
+                    await apiFetch(`/tasks/${encodeURIComponent(ofertaId)}`, { method: 'DELETE' });
+                    notify('Servicio cancelado.', 'success');
+                    await loadMyOfertas();
+                } catch (err) {
+                    notify(`Error: ${err.message}`, 'error');
+                }
+            } else if (btn.dataset.action === 'complete') {
+                const ok = await showConfirm({
+                    title: 'Marcar servicio como completado',
+                    message: 'Confirma que el trabajo terminó.',
+                    confirmLabel: 'Sí, completar'
+                });
+                if (!ok) return;
+                try {
+                    await apiFetch(`/tasks/${encodeURIComponent(ofertaId)}/complete`, { method: 'POST' });
+                    notify('Servicio marcado como completado.', 'success');
+                    await loadMyOfertas();
+                } catch (err) {
+                    notify(`Error: ${err.message}`, 'error');
+                }
+            }
+        });
+    }
+}
+
+// ---------- Ver / aceptar postulaciones o solicitudes (genérico) ----------
+// Sirve tanto para "Mis tareas" (cliente ve postulaciones de
+// trabajadores) como "Mis ofertas" (trabajador ve solicitudes de
+// clientes) — GET /applications/task/{id} ya es genérico en el backend.
+// onAccept es la función a llamar para refrescar la lista de fondo tras
+// aceptar (loadMyTasks o loadMyOfertas, según quién llamó a esto).
+
+async function viewApplications(taskId, tituloTarea, onAccept) {
     let apps;
     try {
         apps = await apiFetch(`/applications/task/${encodeURIComponent(taskId)}`);
@@ -411,7 +690,7 @@ async function viewApplications(taskId, tituloTarea) {
     }
 
     if (!apps.length) {
-        notify('Todavía no tienes postulaciones para esta tarea.', 'info');
+        notify('Todavía no tienes solicitudes para esta publicación.', 'info');
         return;
     }
 
@@ -424,7 +703,7 @@ async function viewApplications(taskId, tituloTarea) {
 
     const heading = document.createElement('h2');
     heading.className = 'modal-title';
-    heading.textContent = tituloTarea ? `Postulaciones — ${tituloTarea}` : 'Postulaciones';
+    heading.textContent = tituloTarea ? `Solicitudes — ${tituloTarea}` : 'Solicitudes';
     modal.appendChild(heading);
 
     const list = document.createElement('div');
@@ -467,8 +746,8 @@ async function viewApplications(taskId, tituloTarea) {
         const btn = e.target.closest('button[data-action="accept"]');
         if (!btn) return;
         const ok = await showConfirm({
-            title: 'Aceptar a este trabajador',
-            message: 'Se asignará la tarea y podrán coordinar por chat. Las demás postulaciones seguirán pendientes pero la tarea dejará de estar disponible.',
+            title: 'Aceptar esta solicitud',
+            message: 'Quedará asignado y podrán coordinar por chat. Las demás solicitudes seguirán pendientes pero la publicación dejará de estar disponible.',
             confirmLabel: 'Sí, aceptar'
         });
         if (!ok) return;
@@ -477,9 +756,9 @@ async function viewApplications(taskId, tituloTarea) {
         btn.textContent = 'Aceptando…';
         try {
             await apiFetch(`/applications/${encodeURIComponent(btn.dataset.appId)}/accept`, { method: 'POST' });
-            notify('Trabajador aceptado. Ya pueden coordinar por chat.', 'success');
+            notify('Solicitud aceptada. Ya pueden coordinar por chat.', 'success');
             close();
-            await loadMyTasks();
+            if (onAccept) await onAccept();
         } catch (err) {
             notify(`Error: ${err.message}`, 'error');
             btn.disabled = false;
@@ -488,21 +767,21 @@ async function viewApplications(taskId, tituloTarea) {
     });
 }
 
-// ---------- Editar tarea (cliente) ----------
-// Antes no había ninguna forma de editar una tarea ya creada. Sólo se
-// permite mientras está "activa" (ver PUT /tasks/{id} en el backend) —
-// no se edita categoría/ubicación acá, para eso conviene cancelar y
-// crear una nueva.
-async function editTask(taskId, t) {
+// ---------- Editar tarea u oferta (genérico) ----------
+// Sólo se permite mientras está "activa" (ver PUT /tasks/{id} en el
+// backend) — no se edita categoría/ubicación acá, para eso conviene
+// cancelar y crear una nueva. onSaved es la función a llamar para
+// refrescar la lista de fondo (loadMyTasks o loadMyOfertas).
+async function editTask(taskId, t, onSaved) {
     if (!t) return;
 
     const result = await showFormModal({
-        title: 'Editar tarea',
+        title: 'Editar',
         confirmLabel: 'Guardar cambios',
         fields: [
             { name: 'titulo', label: 'Título', type: 'text', required: true, value: t.titulo },
             { name: 'descripcion', label: 'Descripción', type: 'textarea', value: t.descripcion || '' },
-            { name: 'precio', label: 'Precio estimado', type: 'number', min: 0, step: '0.01', value: t.precio ?? '' },
+            { name: 'precio', label: 'Precio', type: 'number', min: 0, step: '0.01', value: t.precio ?? '' },
         ]
     });
 
@@ -517,17 +796,17 @@ async function editTask(taskId, t) {
                 precio: result.precio || 0,
             })
         });
-        notify('Tarea actualizada.', 'success');
-        await loadMyTasks();
+        notify('Actualizado correctamente.', 'success');
+        if (onSaved) await onSaved();
     } catch (err) {
         notify(`Error: ${err.message}`, 'error');
     }
 }
 
 // ---------- Dejar reseña (cliente) ----------
-// El endpoint POST /api/reviews/ existía en el backend desde el
-// principio, pero ningún archivo del frontend lo llamaba — no había
-// ninguna forma de dejar una reseña en toda la app.
+// Sólo aplica a necesidades — ver la nota de alcance en
+// routers/tasks.py sobre por qué las reseñas de servicios contratados
+// vía oferta quedan fuera de esta pasada.
 async function leaveReview(taskId, trabajadorId, trabajadorNombre) {
     if (!trabajadorId) {
         notify('No se pudo identificar al trabajador de esta tarea.', 'error');
@@ -580,28 +859,31 @@ async function leaveReview(taskId, trabajadorId, trabajadorNombre) {
     }
 }
 
-// ---------- Crear tarea ----------
+// ---------- Crear tarea (cliente) ----------
 
 export function initTasks() {
     document.getElementById('newTaskBtn')?.addEventListener('click', handleNewTaskClick);
+    document.getElementById('newOfertaBtn')?.addEventListener('click', handleNewOfertaClick);
 }
 
-async function handleNewTaskClick() {
-    // Si por algún motivo todavía no se cargaron (p.ej. loadCategories()
-    // falló), se vuelve a intentar aquí antes de abrir el modal — sin
-    // categorías no hay nada que mostrar en el selector.
+async function ensureCategoriesLoaded() {
     if (!loadedCategories.length) {
         try {
             loadedCategories = await apiFetch('/categories');
         } catch (err) {
             notify(`No se pudieron cargar las categorías: ${err.message}`, 'error');
-            return;
+            return false;
         }
     }
     if (!loadedCategories.length) {
         notify('No hay categorías disponibles todavía.', 'error');
-        return;
+        return false;
     }
+    return true;
+}
+
+async function handleNewTaskClick() {
+    if (!(await ensureCategoriesLoaded())) return;
 
     const categoryOptions = loadedCategories.map(c => ({
         value: String(c.id),
@@ -651,6 +933,64 @@ async function handleNewTaskClick() {
         });
         notify('Tarea creada exitosamente.', 'success');
         await loadMyTasks();
+    } catch (err) {
+        notify(`Error: ${err.message}`, 'error');
+    }
+}
+
+// ---------- Publicar un servicio / oferta (trabajador) ----------
+
+async function handleNewOfertaClick() {
+    if (!(await ensureCategoriesLoaded())) return;
+
+    const categoryOptions = loadedCategories.map(c => ({
+        value: String(c.id),
+        label: `${c.icono ? c.icono + ' ' : ''}${c.nombre}`
+    }));
+
+    const result = await showFormModal({
+        title: 'Publicar un servicio',
+        confirmLabel: 'Continuar',
+        fields: [
+            { name: 'titulo', label: 'Título', type: 'text', required: true, placeholder: 'Ej: Instalación eléctrica residencial' },
+            { name: 'descripcion', label: 'Descripción', type: 'textarea', placeholder: 'Qué incluye el servicio, experiencia, etc.' },
+            { name: 'precio', label: 'Precio (o desde)', type: 'number', min: 0, step: '0.01', placeholder: '0.00' },
+            { name: 'categoria_id', label: 'Categoría', type: 'select', required: true, options: categoryOptions }
+        ]
+    });
+
+    if (result === null) return;
+
+    const categoria = parseInt(result.categoria_id, 10);
+    if (!loadedCategories.some(c => c.id === categoria)) {
+        notify('Selecciona una categoría válida.', 'error');
+        return;
+    }
+
+    let pos;
+    try {
+        pos = await getGeolocation();
+    } catch (err) {
+        notify(geolocationErrorMessage(err), 'error');
+        return;
+    }
+
+    const data = {
+        titulo: result.titulo,
+        descripcion: result.descripcion || '',
+        precio: result.precio || 0,
+        categoria_id: categoria,
+        lat: pos.coords.latitude,
+        lng: pos.coords.longitude
+    };
+
+    try {
+        await apiFetch('/tasks/ofertas', {
+            method: 'POST',
+            body: JSON.stringify(data)
+        });
+        notify('Servicio publicado exitosamente.', 'success');
+        await loadMyOfertas();
     } catch (err) {
         notify(`Error: ${err.message}`, 'error');
     }

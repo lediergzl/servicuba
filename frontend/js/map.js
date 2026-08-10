@@ -4,13 +4,10 @@ let map = null;
 let marker = null;
 let taskMarkers = [];
 
-// Icono propio (azul, por defecto de Leaflet) para "Tu ubicación" vs. un
-// icono distinto (dorado, el acento de la marca) para las tareas — antes
-// ambos usaban el mismo icono azul por defecto de Leaflet, así que si una
-// tarea estaba muy cerca (o exactamente en el mismo punto, ej. una tarea
-// de prueba creada desde la misma posición desde la que se navega), su
-// marcador quedaba tapado exactamente debajo del de "Tu ubicación" y
-// parecía que las tareas "no aparecían" en el mapa.
+// Icono propio (dorado, el acento de la marca) para tareas/ofertas en el
+// mapa, distinto del azul por defecto de Leaflet usado para "Tu
+// ubicación" — evita que un marcador de tarea muy cercano (o en el
+// mismo punto) quede tapado exactamente debajo del de "Tu ubicación".
 const taskIcon = L.icon({
     iconUrl: 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-gold.png',
     shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/images/marker-shadow.png',
@@ -35,11 +32,6 @@ export function initMap() {
                 L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
                     attribution: '© OpenStreetMap'
                 }).addTo(map);
-                // El mapa se crea mientras el contenedor recién se hizo
-                // visible — en ese primer frame Leaflet puede medir mal
-                // el tamaño del contenedor y renderizar los tiles a medias
-                // o desalineados. invalidateSize() fuerza un recálculo una
-                // vez que el layout ya se asentó.
                 setTimeout(() => map.invalidateSize(), 0);
             } else {
                 setTimeout(() => map.invalidateSize(), 0);
@@ -61,14 +53,6 @@ export function initMap() {
                     const params = new URLSearchParams({ lat, lng, radius_km: radius });
                     if (category) params.set('category_id', category);
 
-                    // apiFetch (en vez de un fetch crudo) da manejo de
-                    // errores consistente con el resto de la app: revisa
-                    // res.ok, extrae el mensaje de error del backend y
-                    // maneja el 401 de forma centralizada. Antes, un fetch
-                    // sin .catch() ni chequeo de res.ok fallaba en
-                    // silencio ante cualquier error — no aparecía ningún
-                    // aviso y el mapa se quedaba sin marcadores de tareas
-                    // sin ninguna pista de por qué.
                     apiFetch(`/tasks/nearby?${params.toString()}`)
                         .then(tasks => {
                             clearTaskMarkers();
@@ -95,8 +79,6 @@ export function initMap() {
     });
 }
 
-// Pequeño escape local para no depender de core.js dentro de un innerHTML
-// de Leaflet (bindPopup no pasa por el DOM normal de la app).
 function escapeHtmlLocal(str) {
     const div = document.createElement('div');
     div.textContent = str ?? '';
