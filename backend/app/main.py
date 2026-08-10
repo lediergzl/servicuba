@@ -56,6 +56,24 @@ with engine.connect() as conn:
     conn.execute(text(
         "ALTER TABLE users ADD COLUMN IF NOT EXISTS es_admin BOOLEAN NOT NULL DEFAULT false"
     ))
+    # Dualidad de roles (cliente + trabajador a la vez, ver models/user.py):
+    # bases de datos desplegadas ANTES de esta migración (cuando el
+    # usuario tenía un `rol` fijo) no tienen estas tres columnas. Sin
+    # esto, cualquier fila vieja rompe con ResponseValidationError
+    # ("Field required": es_cliente/es_trabajador/modo_activo) en cuanto
+    # se serializa contra UserResponse — visto en /auth/register al
+    # devolver el ORM crudo, pero afecta a CUALQUIER endpoint que toque
+    # esa fila (GET /users/profile incluido) si la columna directamente
+    # no existe en la tabla.
+    conn.execute(text(
+        "ALTER TABLE users ADD COLUMN IF NOT EXISTS es_cliente BOOLEAN NOT NULL DEFAULT true"
+    ))
+    conn.execute(text(
+        "ALTER TABLE users ADD COLUMN IF NOT EXISTS es_trabajador BOOLEAN NOT NULL DEFAULT false"
+    ))
+    conn.execute(text(
+        "ALTER TABLE users ADD COLUMN IF NOT EXISTS modo_activo VARCHAR(20) NOT NULL DEFAULT 'cliente'"
+    ))
     conn.execute(text(
         "ALTER TABLE tasks ADD COLUMN IF NOT EXISTS destacada BOOLEAN NOT NULL DEFAULT false"
     ))
