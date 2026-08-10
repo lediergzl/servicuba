@@ -74,11 +74,61 @@ with engine.connect() as conn:
     conn.execute(text(
         "ALTER TABLE users ADD COLUMN IF NOT EXISTS modo_activo VARCHAR(20) NOT NULL DEFAULT 'cliente'"
     ))
+    # Perfil de trabajador (activar-trabajador) — mismo problema que
+    # es_cliente/es_trabajador/modo_activo arriba: una base de datos
+    # desplegada antes de que existiera la activación de perfil de
+    # trabajador no tiene NINGUNA de estas columnas. Se vio en producción
+    # con una cuenta vieja que rompía en descripcion_trabajador — como
+    # todas se agregaron juntas en la misma época, se migran todas de
+    # una vez para no ir descubriéndolas una por una en cada deploy.
+    # Todas nullable (sin valor por defecto real): son opcionales hasta
+    # que el usuario activa el modo trabajador.
+    conn.execute(text(
+        "ALTER TABLE users ADD COLUMN IF NOT EXISTS categoria_id INTEGER REFERENCES categories(id)"
+    ))
+    conn.execute(text(
+        "ALTER TABLE users ADD COLUMN IF NOT EXISTS descripcion_trabajador TEXT"
+    ))
+    conn.execute(text(
+        "ALTER TABLE users ADD COLUMN IF NOT EXISTS precio_hora DOUBLE PRECISION"
+    ))
+    conn.execute(text(
+        "ALTER TABLE users ADD COLUMN IF NOT EXISTS lat DOUBLE PRECISION"
+    ))
+    conn.execute(text(
+        "ALTER TABLE users ADD COLUMN IF NOT EXISTS lng DOUBLE PRECISION"
+    ))
+    conn.execute(text(
+        "ALTER TABLE users ADD COLUMN IF NOT EXISTS ubicacion geometry(POINT, 4326)"
+    ))
+    conn.execute(text(
+        "ALTER TABLE users ADD COLUMN IF NOT EXISTS municipio VARCHAR(100)"
+    ))
+    conn.execute(text(
+        "ALTER TABLE users ADD COLUMN IF NOT EXISTS zona VARCHAR(100)"
+    ))
+    conn.execute(text(
+        "ALTER TABLE users ADD COLUMN IF NOT EXISTS foto VARCHAR(255)"
+    ))
+    conn.execute(text(
+        "ALTER TABLE users ADD COLUMN IF NOT EXISTS rating DOUBLE PRECISION DEFAULT 0.0"
+    ))
+    conn.execute(text(
+        "ALTER TABLE users ADD COLUMN IF NOT EXISTS verificado BOOLEAN DEFAULT false"
+    ))
     conn.execute(text(
         "ALTER TABLE tasks ADD COLUMN IF NOT EXISTS destacada BOOLEAN NOT NULL DEFAULT false"
     ))
     conn.execute(text(
         "ALTER TABLE tasks ADD COLUMN IF NOT EXISTS destacada_hasta TIMESTAMP"
+    ))
+    # Marketplace de ofertas (trabajador publica, cliente solicita) — ver
+    # models/task.py y services/nearby.py. Mismo patrón: una tabla tasks
+    # vieja no tiene esta columna, y el router la filtra explícitamente
+    # (Task.tipo == tipo), así que rompería igual que las de arriba en
+    # cuanto se use /tasks/ofertas/nearby contra esta base de datos.
+    conn.execute(text(
+        "ALTER TABLE tasks ADD COLUMN IF NOT EXISTS tipo VARCHAR(20) NOT NULL DEFAULT 'necesidad'"
     ))
     # Contacto (teléfono/WhatsApp) del anunciante — antes el banner de
     # anuncio sólo mostraba un enlace si había url_destino; un negocio sin
