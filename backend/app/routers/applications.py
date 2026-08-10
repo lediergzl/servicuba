@@ -20,35 +20,66 @@ def apply_to_task(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    if current_user.rol.value != "trabajador":
-        raise HTTPException(status_code=403, detail="Solo trabajadores pueden postularse")
-
-    if PLAN_GRATIS_POSTULACIONES_SEMANA is not None and not is_premium_active(current_user):
-        hace_7_dias = datetime.utcnow() - timedelta(days=7)
-        postulaciones_semana = db.query(Application).filter(
-            Application.worker_id == current_user.id,
-            Application.created_at >= hace_7_dias,
-        ).count()
-        if postulaciones_semana >= PLAN_GRATIS_POSTULACIONES_SEMANA:
-            raise HTTPException(
-                status_code=402,
-                detail=(
-                    f"Alcanzaste el límite de {PLAN_GRATIS_POSTULACIONES_SEMANA} "
-                    "postulaciones semanales del plan gratis. Hazte premium para "
-                    "postularte sin límite."
-                ),
-            )
-
     task = db.query(Task).filter(Task.id == task_id).first()
     if not task or task.estado != TaskStatus.ACTIVA:
-        raise HTTPException(status_code=404, detail="Tarea no disponible")
+        raise HTTPException(status_code=404, detail="Publicación no disponible")
+
+    # Este endpoint sirve en las DOS direcciones del marketplace, según
+    # el tipo de la publicación:
+    # - tipo='necesidad' (cliente publicó, busca ayuda): quien se
+    #   postula es un TRABAJADOR — flujo original.
+    # - tipo='oferta' (trabajador publicó un servicio): quien solicita
+    #   contratarlo es un CLIENTE — flujo nuevo, mismo mecanismo.
+    # En ambos casos el registro queda en Application igual (worker_id
+    # guarda simplemente "quién se postuló/solicitó", sin importar si es
+    # cliente o trabajador); accept/list/chat ya son genéricos y no
+    # necesitan tocarse.
+    if task.tipo == "oferta":
+        if not current_user.es_cliente:
+            raise HTTPException(
+                status_code=403,
+                detail="Activa tu perfil de cliente para solicitar este servicio",
+            )
+    else:
+        if not current_user.es_trabajador:
+            raise HTTPException(
+                status_code=403,
+                detail="Activa tu perfil de trabajador para postularte (Perfil → Activar modo Trabajador)",
+            )
+        # El límite semanal del plan gratis sólo aplica a trabajadores
+        # postulándose a necesidades — no hay un límite equivalente
+        # todavía para clientes solicitando ofertas.
+        if PLAN_GRATIS_POSTULACIONES_SEMANA is not None and not is_premium_active(current_user):
+            hace_7_dias = datetime.utcnow() - timedelta(days=7)
+            postulaciones_semana = db.query(Application).filter(
+                Application.worker_id == current_user.id,
+                Application.created_at >= hace_7_dias,
+            ).count()
+            if postulaciones_semana >= PLAN_GRATIS_POSTULACIONES_SEMANA:
+                raise HTTPException(
+                    status_code=402,
+                    detail=(
+                        f"Alcanzaste el límite de {PLAN_GRATIS_POSTULACIONES_SEMANA} "
+                        "postulaciones semanales del plan gratis. Hazte premium para "
+                        "postularte sin límite."
+                    ),
+                )
+
+    # Con un mismo usuario pudiendo ser cliente y trabajador a la vez, hay
+    # que impedir explícitamente que se postule/solicite su propia
+    # publicación — antes esto era imposible por construcción (rol fijo),
+    # ahora no.
+    if task.cliente_id == current_user.id:
+        raise HTTPException(status_code=400, detail="No puedes postularte/solicitar tu propia publicación")
+
     existing = db.query(Application).filter(
         Application.task_id == task_id,
         Application.worker_id == current_user.id,
         Application.estado == AppStatus.PENDIENTE
     ).first()
     if existing:
-        raise HTTPException(status_code=400, detail="Ya te has postulado a esta tarea")
+        raise HTTPException(status_code=400, detail="Ya hiciste esta solicitud")
+
     db_app = Application(
         task_id=task_id,
         worker_id=current_user.id,
@@ -58,12 +89,21 @@ def apply_to_task(
     db.add(db_app)
     db.commit()
     db.refresh(db_app)
-    send_push_to_user(
-        db, task.cliente_id,
-        title="Nueva postulación",
-        body=f"{current_user.nombre} se postuló a \"{task.titulo}\"",
-        url=f"/?task={task_id}",
-    )
+
+    if task.tipo == "oferta":
+        send_push_to_user(
+            db, task.cliente_id,
+            title="Nueva solicitud",
+            body=f"{current_user.nombre} quiere contratar tu servicio \"{task.titulo}\"",
+            url=f"/?task={task_id}",
+        )
+    else:
+        send_push_to_user(
+            db, task.cliente_id,
+            title="Nueva postulación",
+            body=f"{current_user.nombre} se postuló a \"{task.titulo}\"",
+            url=f"/?task={task_id}",
+        )
     return db_app
 
 
@@ -72,11 +112,11 @@ def list_my_applications(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """IDs de tareas a las que el trabajador ya se postuló (pendiente o
-    aceptada). Antes esto sólo se rastreaba en memoria del navegador
-    (appliedTaskIds en tasks.js), así que se perdía al recargar la
-    página: el botón volvía a mostrar "Postular" para una tarea ya
-    postulada y el backend respondía 400 al reintentar."""
+    """IDs de publicaciones (necesidades u ofertas) a las que el usuario
+    ya se postuló/solicitó (pendiente o aceptada). No distingue tipo a
+    propósito: el frontend usa esto tanto para marcar "Ya postulado" en
+    tareas cercanas como "Ya solicitado" en ofertas cercanas, con el
+    mismo Set de ids."""
     rows = (
         db.query(Application.task_id)
         .filter(
@@ -94,16 +134,16 @@ def list_task_applications(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Postulaciones pendientes de una tarea — sólo el cliente dueño puede
-    verlas. Sin este endpoint no había ninguna forma de que el cliente
-    supiera quién se postuló ni de aceptar a un trabajador: apply_to_task
-    enviaba el push de aviso pero no existía ninguna pantalla para
-    consultar/actuar sobre esas postulaciones."""
+    """Solicitudes pendientes de una publicación — sólo quien la publicó
+    puede verlas. Funciona igual para necesidades (cliente ve
+    postulaciones de trabajadores) y ofertas (trabajador ve solicitudes
+    de clientes), porque sólo compara Task.cliente_id (el publicador)
+    contra current_user.id."""
     task = db.query(Task).filter(Task.id == task_id).first()
     if not task:
-        raise HTTPException(status_code=404, detail="Tarea no encontrada")
+        raise HTTPException(status_code=404, detail="Publicación no encontrada")
     if task.cliente_id != current_user.id:
-        raise HTTPException(status_code=403, detail="No eres el cliente de esta tarea")
+        raise HTTPException(status_code=403, detail="No eres el dueño de esta publicación")
 
     rows = (
         db.query(Application, User)
@@ -134,19 +174,28 @@ def accept_application(
 ):
     app = db.query(Application).filter(Application.id == application_id).first()
     if not app:
-        raise HTTPException(status_code=404, detail="Postulación no encontrada")
+        raise HTTPException(status_code=404, detail="Solicitud no encontrada")
     task = db.query(Task).filter(Task.id == app.task_id).first()
     if task.cliente_id != current_user.id:
-        raise HTTPException(status_code=403, detail="No eres el cliente de esta tarea")
+        raise HTTPException(status_code=403, detail="No eres el dueño de esta publicación")
     if task.estado != TaskStatus.ACTIVA:
-        raise HTTPException(status_code=400, detail="La tarea ya no está activa")
+        raise HTTPException(status_code=400, detail="Esta publicación ya no está activa")
     app.estado = AppStatus.ACEPTADA
     task.estado = TaskStatus.ASIGNADA
     db.commit()
-    send_push_to_user(
-        db, app.worker_id,
-        title="¡Postulación aceptada!",
-        body=f"Te asignaron \"{task.titulo}\"",
-        url=f"/?task={task.id}&view=chat",
-    )
-    return {"message": "Trabajador aceptado correctamente"}
+
+    if task.tipo == "oferta":
+        send_push_to_user(
+            db, app.worker_id,
+            title="¡Solicitud aceptada!",
+            body=f"{current_user.nombre} aceptó tu solicitud para \"{task.titulo}\"",
+            url=f"/?task={task.id}&view=chat",
+        )
+    else:
+        send_push_to_user(
+            db, app.worker_id,
+            title="¡Postulación aceptada!",
+            body=f"Te asignaron \"{task.titulo}\"",
+            url=f"/?task={task.id}&view=chat",
+        )
+    return {"message": "Solicitud aceptada correctamente"}

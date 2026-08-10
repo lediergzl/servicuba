@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from ..database import get_db
-from ..models.user import User, UserPlan, UserRole
+from ..models.user import User, UserPlan
 from ..models.task import Task
 from ..models.payment import Payment, PaymentType, PaymentStatus
 from ..models.ad import Ad
@@ -56,8 +56,11 @@ def request_subscription(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    if current_user.rol != UserRole.TRABAJADOR:
-        raise HTTPException(status_code=403, detail="Solo trabajadores pueden suscribirse al plan premium")
+    # Antes: current_user.rol != UserRole.TRABAJADOR (rol fijo). Con la
+    # dualidad de roles, cualquier usuario con el perfil de trabajador
+    # activo (aunque también sea cliente) puede suscribirse al premium.
+    if not current_user.es_trabajador:
+        raise HTTPException(status_code=403, detail="Activa tu perfil de trabajador para suscribirte al plan premium")
 
     existing = db.query(Payment).filter(
         Payment.user_id == current_user.id,
