@@ -17,9 +17,8 @@
     <link href="https://fonts.googleapis.com/css2?family=Big+Shoulders+Display:wght@800&family=Inter:wght@400;500;600;700&family=IBM+Plex+Mono:wght@500&display=swap" rel="stylesheet">
     <!-- Leaflet: map.js llama a L.map/L.tileLayer/L.marker como si la
          librería ya estuviera cargada, pero no había ningún <link>/<script>
-         de Leaflet en la página — de ahí el "L is not defined" al tocar
-         "Mostrar mapa". Se carga desde CDN (unpkg), CSS aquí y el JS al
-         final del <body>, antes de app.js. -->
+         de Leaflet en la página. Se carga desde CDN (unpkg), CSS aquí y
+         el JS al final del <body>, antes de app.js. -->
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
           integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
           crossorigin="">
@@ -49,6 +48,22 @@
             <button id="verifyNowBtn" class="btn btn-accent btn-sm">Verificar ahora</button>
         </div>
 
+        <!-- Selector de modo: un mismo usuario puede tener perfil de
+             cliente Y de trabajador a la vez. Este switch cambia entre
+             ambos paneles sin recargar la página — ver initModeSwitch()
+             en app.js. Tocar "Trabajador" sin tener ese perfil activo
+             todavía abre el formulario de activación en vez de fallar. -->
+        <div id="modoSwitch" class="mode-switch hidden">
+            <button type="button" class="mode-switch__btn is-active" data-modo="cliente">
+                <svg class="icon" viewBox="0 0 24 24"><circle cx="12" cy="8" r="3.5"/><path d="M5 20c0-4 3-6.5 7-6.5s7 2.5 7 6.5"/></svg>
+                Cliente
+            </button>
+            <button type="button" class="mode-switch__btn" data-modo="trabajador">
+                <svg class="icon" viewBox="0 0 24 24"><path d="M14.7 6.3a4 4 0 0 0-5.4 5.4L4 17l3 3 5.3-5.3a4 4 0 0 0 5.4-5.4l-2.5 2.5-2-2 2.5-2.5Z"/></svg>
+                Trabajador
+            </button>
+        </div>
+
         <main id="views" class="app-main">
             <!-- Landing -->
             <div id="landing" class="view view--centered">
@@ -69,14 +84,15 @@
             <!-- Registro -->
             <div id="register" class="view hidden">
                 <h2 class="view-title">Crear cuenta</h2>
+                <p class="view-subtitle" style="margin:0 0 16px">Tu cuenta siempre puede publicar tareas. Si además ofreces un oficio, actívalo aquí o después desde tu perfil.</p>
                 <form id="registerForm" class="stack-md">
                     <input type="text" id="regNombre" placeholder="Nombre completo" class="field-input" required>
                     <input type="tel" id="regTelefono" placeholder="Teléfono" class="field-input" required>
                     <input type="password" id="regPassword" placeholder="Contraseña" class="field-input" required>
-                    <select id="regRol" class="field-input">
-                        <option value="cliente">Necesito un trabajador (Cliente)</option>
-                        <option value="trabajador">Ofrezco mis servicios (Trabajador)</option>
-                    </select>
+                    <label class="field-checkbox">
+                        <input type="checkbox" id="regEsTrabajador">
+                        ¿También ofreces servicios? Activa tu perfil de trabajador
+                    </label>
                     <div id="categoriaField" class="hidden">
                         <select id="regCategoria" class="field-input"></select>
                     </div>
@@ -108,30 +124,62 @@
                     <h2 class="view-title">Mis tareas</h2>
                     <button id="newTaskBtn" class="btn btn-accent btn-sm">+ Nueva tarea</button>
                 </div>
-                <div id="misTareas" class="stack-sm"></div>
+                <div class="sub-tabs">
+                    <button class="sub-tab is-active" data-clientetab="tareas" type="button">Mis tareas</button>
+                    <button class="sub-tab" data-clientetab="ofertas" type="button">Ofertas cercanas</button>
+                </div>
+                <div id="misTareasPanel">
+                    <div id="misTareas" class="stack-sm"></div>
+                </div>
+                <div id="ofertasCercanasPanel" class="hidden">
+                    <div class="filter-row">
+                        <select id="filtroRadioOfertas" class="field-input field-input--auto">
+                            <option value="1">1 km</option>
+                            <option value="3" selected>3 km</option>
+                            <option value="5">5 km</option>
+                            <option value="10">10 km</option>
+                        </select>
+                        <select id="filtroCategoriaOfertas" class="field-input field-input--auto">
+                            <option value="">Todas</option>
+                        </select>
+                    </div>
+                    <div id="listaOfertasCercanas" class="stack-sm"></div>
+                </div>
             </div>
 
             <!-- Dashboard Trabajador -->
             <div id="dashboardTrabajador" class="view hidden">
-                <h2 class="view-title">Tareas cercanas</h2>
-                <div id="adBannerTrabajador"></div>
-                <div class="filter-row">
-                    <select id="filtroRadio" class="field-input field-input--auto">
-                        <option value="1">1 km</option>
-                        <option value="3" selected>3 km</option>
-                        <option value="5">5 km</option>
-                        <option value="10">10 km</option>
-                    </select>
-                    <select id="filtroCategoria" class="field-input field-input--auto">
-                        <option value="">Todas</option>
-                    </select>
+                <div class="view-header-row">
+                    <h2 class="view-title">Tareas cercanas</h2>
+                    <button id="newOfertaBtn" class="btn btn-accent btn-sm">+ Publicar servicio</button>
                 </div>
-                <div id="listaTareas" class="stack-sm"></div>
-                <button id="toggleMapBtn" class="btn btn-secondary btn-block mt-md">
-                    <svg class="icon" viewBox="0 0 24 24"><path d="M3 6l6-2 6 2 6-2v14l-6 2-6-2-6 2V6Z"/><path d="M9 4v14M15 6v14"/></svg>
-                    Mostrar mapa
-                </button>
-                <div id="map" class="hidden map-box"></div>
+                <div class="sub-tabs">
+                    <button class="sub-tab is-active" data-trabajadortab="cercanas" type="button">Tareas cercanas</button>
+                    <button class="sub-tab" data-trabajadortab="ofertas" type="button">Mis ofertas</button>
+                </div>
+                <div id="tareasCercanasPanel">
+                    <div id="adBannerTrabajador"></div>
+                    <div class="filter-row">
+                        <select id="filtroRadio" class="field-input field-input--auto">
+                            <option value="1">1 km</option>
+                            <option value="3" selected>3 km</option>
+                            <option value="5">5 km</option>
+                            <option value="10">10 km</option>
+                        </select>
+                        <select id="filtroCategoria" class="field-input field-input--auto">
+                            <option value="">Todas</option>
+                        </select>
+                    </div>
+                    <div id="listaTareas" class="stack-sm"></div>
+                    <button id="toggleMapBtn" class="btn btn-secondary btn-block mt-md">
+                        <svg class="icon" viewBox="0 0 24 24"><path d="M3 6l6-2 6 2 6-2v14l-6 2-6-2-6 2V6Z"/><path d="M9 4v14M15 6v14"/></svg>
+                        Mostrar mapa
+                    </button>
+                    <div id="map" class="hidden map-box"></div>
+                </div>
+                <div id="misOfertasPanel" class="hidden">
+                    <div id="misOfertas" class="stack-sm"></div>
+                </div>
             </div>
 
             <!-- Mensajes -->
@@ -166,6 +214,7 @@
             <div id="perfilView" class="view hidden">
                 <h2 class="view-title">Mi perfil</h2>
                 <div id="perfilContenido"></div>
+                <div id="workerActivationSection" class="mt-md"></div>
                 <div id="premiumSection" class="mt-md"></div>
                 <button id="sponsorAdBtn" class="btn btn-secondary btn-block mt-md">
                     <svg class="icon" viewBox="0 0 24 24"><path d="M3 6l6-2 6 2 6-2v14l-6 2-6-2-6 2V6Z"/><path d="M9 4v14M15 6v14"/></svg>
@@ -191,13 +240,15 @@
                 </div>
                 <h2 class="view-title">Administración</h2>
                 <div class="admin-tabs">
-                    <button class="admin-tab is-active" data-tab="pagos" type="button">Pagos pendientes</button>
+                    <button class="admin-tab is-active" data-tab="pagos" type="button">Pagos</button>
                     <button class="admin-tab" data-tab="anuncios" type="button">Anuncios</button>
                     <button class="admin-tab" data-tab="categorias" type="button">Categorías</button>
+                    <button class="admin-tab" data-tab="usuarios" type="button">Usuarios</button>
                 </div>
                 <div id="adminPagos" class="stack-sm mt-md"></div>
                 <div id="adminAnuncios" class="stack-sm mt-md hidden"></div>
                 <div id="adminCategorias" class="stack-sm mt-md hidden"></div>
+                <div id="adminUsuarios" class="stack-sm mt-md hidden"></div>
             </div>
         </main>
 
