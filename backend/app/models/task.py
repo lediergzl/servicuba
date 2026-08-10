@@ -27,6 +27,13 @@ class Task(Base):
     zona = Column(String(100), nullable=True)
     referencia = Column(Text, nullable=True)
     estado = Column(Enum(TaskStatus), default=TaskStatus.ACTIVA)
+    # 'necesidad' (cliente busca un servicio — el único flujo implementado
+    # hoy) vs 'oferta' (trabajador publica un servicio que ofrece, para
+    # que un cliente lo "contrate" navegando ofertas). La columna existe
+    # para no romper compatibilidad futura con ese marketplace simétrico,
+    # pero ese flujo (crear/listar ofertas) TODAVÍA NO está implementado
+    # — todas las tareas se crean hoy con tipo='necesidad'.
+    tipo = Column(String(20), default="necesidad", nullable=False)
     destacada = Column(Boolean, default=False, nullable=False)
     destacada_hasta = Column(DateTime, nullable=True)
     created_at = Column(DateTime, server_default=func.now())
