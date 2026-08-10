@@ -38,6 +38,10 @@ class TaskResponse(BaseModel):
     zona: Optional[str]
     referencia: Optional[str]
     estado: str
+    # 'necesidad' siempre por ahora — ver nota en models/task.py sobre el
+    # alcance de la dualidad de roles (el marketplace de "ofertas" de
+    # trabajador todavía no está implementado).
+    tipo: str = "necesidad"
     destacada: bool
     destacada_hasta: Optional[datetime] = None
     created_at: datetime
