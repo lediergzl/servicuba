@@ -4,6 +4,7 @@ from ..database import get_db
 from ..models.user import User, UserRole
 from ..schemas.user import UserCreate, UserLogin, Token, UserResponse
 from ..utils.security import verify_password, get_password_hash, create_access_token
+from ..services.user_profile import build_user_response
 from datetime import timedelta
 from ..config import get_settings
 
@@ -34,7 +35,17 @@ def register(user: UserCreate, db: Session = Depends(get_db)):
     db.add(db_user)
     db.commit()
     db.refresh(db_user)
-    return db_user
+    # Antes: `return db_user` devolvía el objeto ORM crudo, que FastAPI
+    # serializa leyendo atributos directamente. Para cuentas viejas (de
+    # antes de la dualidad de roles) cuyo objeto no tuviera poblados
+    # es_cliente/es_trabajador/modo_activo, eso rompía con
+    # ResponseValidationError ("Field required"). build_user_response()
+    # es el único lugar que arma la respuesta de usuario (ya lo usan
+    # GET /users/profile, PUT /users/activar-trabajador y
+    # PUT /users/modo-activo) y fuerza esos campos explícitamente, además
+    # de resolver categoria_nombre/categoria_icono que acá siempre
+    # quedaban en None.
+    return build_user_response(db, db_user)
 
 @router.post("/login", response_model=Token)
 def login(user: UserLogin, db: Session = Depends(get_db)):
