@@ -10,6 +10,7 @@ from ..models.user import User
 from ..schemas.task import TaskCreate, TaskUpdate, TaskResponse
 from ..services.auth import get_current_user
 from ..services.plans import is_premium_active, PLAN_GRATIS_RADIO_MAX_KM, PLAN_PREMIUM_RADIO_MAX_KM
+from ..services.nearby import find_nearby
 from uuid import UUID
 from typing import Optional
 
@@ -158,6 +159,113 @@ def get_my_tasks(
             "ya_reseniada": ya_reseniada,
         })
     return result
+
+
+# ---------- Ofertas (trabajador publica un servicio, cliente lo solicita) ----------
+# Mismo mecanismo que las "necesidades" de arriba, en la dirección
+# contraria — ver la nota grande en frontend/js/tasks.js y en
+# services/nearby.py sobre por qué casi todo el resto (postularse/
+# solicitar, aceptar, chat, destacar) ya es genérico y no necesita rutas
+# propias. Sólo faltaban estas tres: crear, buscar cercanas y listar
+# las propias. Deben declararse ANTES de GET /{task_id} para que
+# "ofertas" no se intente interpretar como un UUID.
+
+@router.post("/ofertas", response_model=TaskResponse)
+def create_oferta(
+    task: TaskCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    if not current_user.es_trabajador:
+        raise HTTPException(status_code=403, detail="Activa tu perfil de trabajador para publicar un servicio")
+    point = ST_SetSRID(ST_MakePoint(task.lng, task.lat), 4326)
+    db_task = Task(
+        cliente_id=current_user.id,  # quien PUBLICÓ (el trabajador) — ver nota en models/task.py
+        categoria_id=task.categoria_id,
+        titulo=task.titulo,
+        descripcion=task.descripcion,
+        precio=task.precio,
+        ubicacion=point,
+        municipio=task.municipio,
+        zona=task.zona,
+        referencia=task.referencia,
+        estado=TaskStatus.ACTIVA,
+        tipo="oferta",
+    )
+    db.add(db_task)
+    db.commit()
+    db.refresh(db_task)
+    return db_task
+
+
+@router.get("/ofertas/nearby")
+def get_nearby_ofertas(
+    lat: float = Query(...),
+    lng: float = Query(...),
+    radius_km: float = Query(3.0, ge=0.1, le=50),
+    category_id: Optional[int] = None,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    # Mismo beneficio de radio por plan que /tasks/nearby, aplicado acá
+    # aunque quien busca sea un cliente (no sólo trabajadores premium).
+    radio_max = PLAN_PREMIUM_RADIO_MAX_KM if is_premium_active(current_user) else PLAN_GRATIS_RADIO_MAX_KM
+    radius_km = min(radius_km, radio_max)
+    return find_nearby(db, lat, lng, radius_km, tipo="oferta", category_id=category_id)
+
+
+@router.get("/ofertas/mine")
+def get_my_ofertas(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    from ..models.application import Application, AppStatus
+    from ..models.user import User as UserModel
+
+    ofertas = (
+        db.query(Task)
+        .filter(Task.cliente_id == current_user.id, Task.tipo == "oferta")
+        .order_by(Task.created_at.desc())
+        .all()
+    )
+
+    result = []
+    for oferta in ofertas:
+        # Nombre del CLIENTE cuya solicitud fue aceptada (si lo hay) —
+        # tasks.js usa esto para el encabezado del chat de una oferta
+        # (openChatForTask lee o.cliente_nombre, no o.trabajador_nombre).
+        cliente_solicitante_id = None
+        cliente_nombre = None
+        if oferta.estado.value in ("asignada", "en_proceso", "completada"):
+            row = (
+                db.query(UserModel.id, UserModel.nombre)
+                .join(Application, Application.worker_id == UserModel.id)
+                .filter(Application.task_id == oferta.id, Application.estado == AppStatus.ACEPTADA)
+                .first()
+            )
+            if row:
+                cliente_solicitante_id = str(row.id)
+                cliente_nombre = row.nombre
+
+        result.append({
+            "id": str(oferta.id),
+            "cliente_id": str(oferta.cliente_id),
+            "categoria_id": oferta.categoria_id,
+            "titulo": oferta.titulo,
+            "descripcion": oferta.descripcion,
+            "precio": oferta.precio,
+            "municipio": oferta.municipio,
+            "zona": oferta.zona,
+            "referencia": oferta.referencia,
+            "estado": oferta.estado.value,
+            "destacada": oferta.destacada,
+            "destacada_hasta": oferta.destacada_hasta,
+            "created_at": oferta.created_at,
+            "cliente_solicitante_id": cliente_solicitante_id,
+            "cliente_nombre": cliente_nombre,
+        })
+    return result
+
 
 @router.get("/{task_id}", response_model=TaskResponse)
 def get_task(task_id: UUID, db: Session = Depends(get_db)):
