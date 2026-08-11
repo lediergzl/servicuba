@@ -7,6 +7,7 @@ import { initPush, enablePushNotifications } from './push.js';
 import { initVerification, refreshVerificationBanner } from './verification.js';
 import { renderPremiumSection, initSponsorAdEntry, loadAdBanner } from './monetization.js';
 import { checkAndShowAdminEntry, initAdminPanel, loadPendingPayments } from './admin.js';
+import { initLandingSearch } from './landing.js';
 
 // Dualidad de roles: reemplaza a la antigua variable `currentRole` (que
 // asumía un rol fijo). currentModo es cuál panel se está mostrando
@@ -297,6 +298,10 @@ document.addEventListener('DOMContentLoaded', () => {
     initModeSwitch();
     initSponsorAdEntry();
     initAdminPanel();
+    // Sólo importa mientras el usuario esté deslogueado (landing) — no
+    // hace daño llamarlo siempre, initLandingSearch resuelve solo si el
+    // buscador del hero está en el DOM.
+    initLandingSearch();
 
     document.getElementById('loginBtn')?.addEventListener('click', showLogin);
     document.getElementById('loginBtn2')?.addEventListener('click', showLogin);
