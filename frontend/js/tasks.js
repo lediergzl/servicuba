@@ -68,6 +68,36 @@ export async function loadCategories(forceRefresh = false) {
     });
 }
 
+// ---------- Ubicación con reintento (sin perder datos ya escritos) ----------
+// Antes: al crear una tarea/oferta, la ubicación se pedía DESPUÉS de
+// cerrar el modal con los datos ya llenados. Si el GPS tardaba o
+// fallaba (el timeout de getGeolocation() en core.js es de 10s), el
+// catch cortaba la función entera y el usuario tenía que volver a
+// escribir todo desde cero. Ahora:
+//   1) la ubicación se empieza a pedir EN PARALELO mientras el usuario
+//      todavía está llenando el formulario (normalmente ya resuelve
+//      antes de que toque "Continuar"), y
+//   2) si falla igual, se ofrece reintentar SIN perder los datos: el
+//      `result` del formulario sigue vivo en memoria porque nunca se
+//      sale de la función que lo generó.
+async function requestLocationWithRetry(firstAttempt) {
+    let attempt = firstAttempt || getGeolocation();
+    while (true) {
+        try {
+            return await attempt;
+        } catch (err) {
+            const retry = await showConfirm({
+                title: 'No se pudo obtener tu ubicación',
+                message: `${geolocationErrorMessage(err)} Tranquilo: lo que ya escribiste no se perdió, puedes intentar de nuevo.`,
+                confirmLabel: 'Reintentar ubicación',
+                cancelLabel: 'Cancelar'
+            });
+            if (!retry) return null;
+            attempt = getGeolocation();
+        }
+    }
+}
+
 // ---------- Tareas cercanas (trabajador busca necesidades) ----------
 
 export async function loadNearbyTasks() {
@@ -885,6 +915,13 @@ async function ensureCategoriesLoaded() {
 async function handleNewTaskClick() {
     if (!(await ensureCategoriesLoaded())) return;
 
+    // La ubicación se empieza a pedir EN PARALELO, antes de mostrar el
+    // formulario — normalmente ya resuelve mientras el usuario está
+    // escribiendo, en vez de sumar esa espera recién al final (ver
+    // requestLocationWithRetry más arriba para el detalle del bug que
+    // esto corrige).
+    const locationPromise = getGeolocation();
+
     const categoryOptions = loadedCategories.map(c => ({
         value: String(c.id),
         label: `${c.icono ? c.icono + ' ' : ''}${c.nombre}`
@@ -909,11 +946,9 @@ async function handleNewTaskClick() {
         return;
     }
 
-    let pos;
-    try {
-        pos = await getGeolocation();
-    } catch (err) {
-        notify(geolocationErrorMessage(err), 'error');
+    const pos = await requestLocationWithRetry(locationPromise);
+    if (!pos) {
+        notify('No se publicó la tarea. Puedes intentarlo de nuevo con "+ Nueva tarea" cuando quieras.', 'info');
         return;
     }
 
@@ -943,6 +978,11 @@ async function handleNewTaskClick() {
 async function handleNewOfertaClick() {
     if (!(await ensureCategoriesLoaded())) return;
 
+    // Mismo motivo que en handleNewTaskClick: pedir la ubicación en
+    // paralelo con el llenado del formulario, y con reintento si falla,
+    // para no perder los datos ya escritos.
+    const locationPromise = getGeolocation();
+
     const categoryOptions = loadedCategories.map(c => ({
         value: String(c.id),
         label: `${c.icono ? c.icono + ' ' : ''}${c.nombre}`
@@ -967,11 +1007,9 @@ async function handleNewOfertaClick() {
         return;
     }
 
-    let pos;
-    try {
-        pos = await getGeolocation();
-    } catch (err) {
-        notify(geolocationErrorMessage(err), 'error');
+    const pos = await requestLocationWithRetry(locationPromise);
+    if (!pos) {
+        notify('No se publicó el servicio. Puedes intentarlo de nuevo con "+ Publicar servicio" cuando quieras.', 'info');
         return;
     }
 
