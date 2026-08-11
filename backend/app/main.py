@@ -41,6 +41,20 @@ Base.metadata.create_all(bind=engine)
 # faltarían estas dos columnas. Es idempotente y no afecta instalaciones
 # nuevas (ya las crea create_all).
 with engine.connect() as conn:
+    # `rol` es el campo DEPRECADO de antes de la dualidad de roles (ver
+    # models/user.py, donde ya está declarado nullable=True). PERO
+    # create_all() sólo crea tablas nuevas — nunca altera una columna ya
+    # existente en una base de datos desplegada. Cualquier base creada
+    # ANTES de la dualidad de roles todavía tiene esa columna como
+    # NOT NULL a nivel de Postgres, y el registro (que ya no asigna
+    # `rol`, siempre queda en None) rompía con
+    # "null value in column rol violates not-null constraint" en cada
+    # intento de crear una cuenta. DROP NOT NULL es idempotente: si la
+    # columna ya es nullable (bases de datos nuevas, creadas ya con el
+    # modelo actual), no hace nada.
+    conn.execute(text(
+        "ALTER TABLE users ALTER COLUMN rol DROP NOT NULL"
+    ))
     conn.execute(text(
         "ALTER TABLE users ADD COLUMN IF NOT EXISTS codigo_verificacion VARCHAR(10)"
     ))
