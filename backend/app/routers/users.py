@@ -1,5 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
+from sqlalchemy import func
 from typing import Optional
 from ..database import get_db
 from ..models.user import User
@@ -72,6 +73,28 @@ def cambiar_modo_activo(
     db.commit()
     db.refresh(current_user)
     return build_user_response(db, current_user)
+
+
+# ---------- Estadísticas públicas ----------
+# Sin autenticación a propósito: alimenta el buscador instantáneo del
+# Hero en la landing page ("¿Qué necesitas reparar?"), que se ve ANTES
+# de iniciar sesión — ver frontend/js/landing.js. Una sola consulta
+# agregada (GROUP BY) en vez de contar por categoría en un loop, para no
+# introducir N+1 en una pantalla que se carga en cada visita anónima.
+
+@router.get("/stats/workers-count")
+def workers_count(db: Session = Depends(get_db)):
+    total = db.query(User).filter(User.es_trabajador == True).count()  # noqa: E712
+    rows = (
+        db.query(User.categoria_id, func.count(User.id))
+        .filter(User.es_trabajador == True, User.categoria_id.isnot(None))  # noqa: E712
+        .group_by(User.categoria_id)
+        .all()
+    )
+    return {
+        "total": total,
+        "por_categoria": {str(cat_id): count for cat_id, count in rows},
+    }
 
 
 # ---------- Administración ----------
