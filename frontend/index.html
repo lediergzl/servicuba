@@ -73,9 +73,13 @@
                     <polygon points="18.06,15.5 12,19 5.94,15.5 5.94,8.5 12,5 18.06,8.5" fill="none" style="stroke:var(--ink)" stroke-width="1.1" stroke-linejoin="round"/>
                     <circle cx="12" cy="12" r="2.3" style="fill:var(--accent)"/>
                 </svg>
-                <h2 class="view-title">Encuentra trabajadores cerca de ti</h2>
-                <p class="view-subtitle">Publica tu necesidad y recibe postulaciones en minutos.</p>
-                <div class="stack-md">
+                <h2 class="view-title">¿Qué necesitas reparar hoy?</h2>
+                <p id="heroWorkerCount" class="view-subtitle">Buscando trabajadores disponibles…</p>
+                <div class="hero-search">
+                    <input type="text" id="heroSearchInput" class="field-input" placeholder="Ej: electricista, plomero, albañil…" autocomplete="off">
+                    <div id="heroSearchResults" class="hero-search__results hidden"></div>
+                </div>
+                <div class="stack-md mt-md">
                     <button id="registerBtn" class="btn btn-accent btn-block">Registrarme</button>
                     <button id="loginBtn2" class="btn btn-primary btn-block">Ya tengo cuenta</button>
                 </div>
