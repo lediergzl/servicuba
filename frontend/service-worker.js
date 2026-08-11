@@ -8,7 +8,10 @@
 // v9: fix en tasks.js — la ubicación GPS se pide en paralelo al llenar
 // el formulario de "Nueva tarea"/"Publicar servicio", con reintento sin
 // perder los datos si falla (antes se perdía todo lo escrito).
-const CACHE_VERSION = 'v9';
+// v10: landing.js ahora revisa el token antes de mandar a "Regístrate"
+// (si ya hay sesión, va directo al dashboard) y tasks.js precarga la
+// categoría elegida en el buscador del hero al abrir "Nueva tarea".
+const CACHE_VERSION = 'v10';
 const CACHE_NAME = `servicuba-${CACHE_VERSION}`;
 
 const urlsToCache = [
