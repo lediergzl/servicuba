@@ -236,20 +236,32 @@ async function fetchAndRenderAd(containerId, categoryId) {
     shown.add(ad.id);
     _adShownIds.set(containerId, shown);
 
+    // Antes: toda la tarjeta era clickeable para abrir url_destino, con
+    // sólo un link de texto para el teléfono — poco profesional y con
+    // affordance ambigua (¿qué parte del texto es "el botón"?). Ahora
+    // hay un avatar con la inicial de la marca y botones de acción
+    // explícitos, como cualquier tarjeta de anuncio real.
+    const inicial = (ad.marca || '').trim().charAt(0).toUpperCase() || '★';
+
     container.innerHTML = `
-        <div class="ad-banner" role="complementary" aria-label="Anuncio">
-            <span class="ad-banner__tag">Patrocinado</span>
-            <p class="ad-banner__brand">${escapeHtml(ad.marca)}</p>
+        <div class="ad-banner" role="complementary" aria-label="Anuncio patrocinado">
+            <div class="ad-banner__header">
+                <span class="ad-banner__avatar">${escapeHtml(inicial)}</span>
+                <div class="ad-banner__headerText">
+                    <span class="ad-banner__tag">Patrocinado</span>
+                    <p class="ad-banner__brand">${escapeHtml(ad.marca)}</p>
+                </div>
+            </div>
             <p class="ad-banner__text">${escapeHtml(ad.texto)}</p>
-            ${ad.contacto ? `<a class="ad-banner__contact" href="tel:${escapeHtml(ad.contacto)}">📞 ${escapeHtml(ad.contacto)}</a>` : ''}
+            <div class="ad-banner__actions">
+                ${ad.contacto ? `<a class="ad-banner__cta ad-banner__cta--ghost" href="tel:${escapeHtml(ad.contacto)}">📞 Llamar</a>` : ''}
+                ${ad.url_destino ? `<button type="button" class="ad-banner__cta" data-role="ad-cta">Ver más →</button>` : ''}
+            </div>
         </div>
     `;
 
     if (ad.url_destino) {
-        const banner = container.querySelector('.ad-banner');
-        banner.style.cursor = 'pointer';
-        banner.addEventListener('click', async (e) => {
-            if (e.target.closest('.ad-banner__contact')) return;
+        container.querySelector('[data-role="ad-cta"]')?.addEventListener('click', async () => {
             try {
                 const { url_destino } = await apiFetch(`/ads/${ad.id}/click`, { method: 'POST' });
                 if (url_destino) window.open(url_destino, '_blank', 'noopener');
