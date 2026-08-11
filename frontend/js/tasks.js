@@ -927,15 +927,26 @@ async function handleNewTaskClick() {
         label: `${c.icono ? c.icono + ' ' : ''}${c.nombre}`
     }));
 
+    // Si el usuario vino del buscador del hero de la landing (ver
+    // landing.js), ya eligió una categoría ahí — se preselecciona acá
+    // para no hacerlo elegir dos veces. Se consume una sola vez.
+    const preselectedCategoria = sessionStorage.getItem('heroSelectedCategoriaId');
+    sessionStorage.removeItem('heroSelectedCategoriaId');
+
+    const fields = [
+        { name: 'titulo', label: 'Título', type: 'text', required: true, placeholder: 'Ej: Armar mueble de IKEA' },
+        { name: 'descripcion', label: 'Descripción', type: 'textarea', placeholder: 'Detalles del trabajo...' },
+        { name: 'precio', label: 'Precio estimado', type: 'number', min: 0, step: '0.01', placeholder: '0.00' },
+        { name: 'categoria_id', label: 'Categoría', type: 'select', required: true, options: categoryOptions }
+    ];
+    if (preselectedCategoria) {
+        fields.find(f => f.name === 'categoria_id').value = preselectedCategoria;
+    }
+
     const result = await showFormModal({
         title: 'Nueva tarea',
         confirmLabel: 'Continuar',
-        fields: [
-            { name: 'titulo', label: 'Título', type: 'text', required: true, placeholder: 'Ej: Armar mueble de IKEA' },
-            { name: 'descripcion', label: 'Descripción', type: 'textarea', placeholder: 'Detalles del trabajo...' },
-            { name: 'precio', label: 'Precio estimado', type: 'number', min: 0, step: '0.01', placeholder: '0.00' },
-            { name: 'categoria_id', label: 'Categoría', type: 'select', required: true, options: categoryOptions }
-        ]
+        fields
     });
 
     if (result === null) return;
