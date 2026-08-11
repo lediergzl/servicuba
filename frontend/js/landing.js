@@ -9,6 +9,7 @@
 // ============================================================
 import { apiFetch, escapeHtml, notify } from './core.js';
 import { showRegister } from './auth.js';
+import { showDashboardCliente } from './tasks.js';
 
 let categoriesCache = null;
 let countsCache = null;
@@ -98,6 +99,14 @@ export async function initLandingSearch() {
                 sessionStorage.setItem('heroSelectedCategoriaId', btn.dataset.catId);
                 resultsBox.classList.add('hidden');
                 input.value = '';
+
+                if (localStorage.getItem('token')) {
+                    // Ya tiene cuenta — no tiene sentido mandarlo a "Crear cuenta".
+                    notify(`Toca "+ Nueva tarea" para publicar tu necesidad de ${btn.dataset.catNombre}.`, 'info');
+                    showDashboardCliente();
+                    return;
+                }
+
                 notify(`Regístrate para publicar tu necesidad de ${btn.dataset.catNombre} y recibir postulaciones.`, 'info');
                 showRegister();
             });
