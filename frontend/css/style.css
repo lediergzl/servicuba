@@ -641,33 +641,116 @@ h1, h2, h3 {
 .profile-card__meta { color: var(--muted); font-size: var(--text-sm); margin-top: 5px; }
 
 /* ---------- Anuncios de marca ---------- */
+/* Antes: tarjeta blanca con borde punteado color cobre — visualmente se
+   leía como un placeholder de "falta contenido", no como un espacio
+   publicitario real. Ahora usa el mismo lenguaje que .task-card
+   (elevación, radios, sombra) más una franja de acento lateral y un
+   avatar de marca, para que se sienta como una pieza terminada del
+   producto — con jerarquía clara (badge → marca → texto → acción) en
+   vez de todo al mismo peso visual. */
 
 .ad-banner {
-    background: var(--paper-raised);
-    border: 1px dashed var(--copper);
-    border-radius: var(--radius-md);
-    padding: 12px 14px;
-    margin-bottom: 12px;
     position: relative;
+    background: linear-gradient(160deg, var(--paper-raised) 0%, var(--accent-soft) 145%);
+    border: 1px solid var(--line);
+    border-radius: var(--radius-md);
+    padding: 14px 16px 16px 20px;
+    margin-bottom: 12px;
+    box-shadow: var(--shadow-card);
+    overflow: hidden;
+    transition: box-shadow 0.15s var(--ease), transform 0.15s var(--ease);
 }
+.ad-banner::before {
+    /* franja de acento — el mismo truco que .task-card--featured usa
+       para "tareas destacadas", así el patrón visual de "esto pagó por
+       destacarse" es consistente en toda la app. */
+    content: '';
+    position: absolute;
+    inset: 0 auto 0 0;
+    width: 4px;
+    background: linear-gradient(180deg, var(--accent), var(--copper));
+}
+.ad-banner:hover {
+    box-shadow: var(--shadow-card-hover);
+    transform: translateY(-1px);
+}
+
+.ad-banner__header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 8px;
+}
+.ad-banner__avatar {
+    flex-shrink: 0;
+    width: 36px;
+    height: 36px;
+    border-radius: 10px;
+    background: linear-gradient(160deg, var(--ink-soft), var(--ink));
+    color: var(--accent);
+    font-family: var(--font-display);
+    font-size: 17px;
+    font-weight: 800;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    box-shadow: var(--shadow-xs);
+}
+.ad-banner__headerText { min-width: 0; }
 .ad-banner__tag {
-    font-family: var(--font-mono);
-    font-size: 10px;
-    text-transform: uppercase;
-    letter-spacing: 0.04em;
-    color: var(--copper);
-}
-.ad-banner__brand { font-weight: 700; font-size: var(--text-base); margin: 4px 0 2px; }
-.ad-banner__text { font-size: var(--text-sm); color: var(--muted); margin: 0; }
-.ad-banner__contact {
     display: inline-block;
-    margin-top: 8px;
-    font-size: var(--text-sm);
-    font-weight: 600;
-    color: var(--copper);
-    text-decoration: none;
+    font-family: var(--font-mono);
+    font-size: 9.5px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--accent-ink);
+    background: var(--accent);
+    border-radius: 999px;
+    padding: 2px 8px;
+    margin-bottom: 3px;
 }
-.ad-banner__contact:hover { text-decoration: underline; }
+.ad-banner__brand {
+    font-weight: 700;
+    font-size: var(--text-base);
+    line-height: 1.15;
+    color: var(--ink);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.ad-banner__text {
+    font-size: var(--text-sm);
+    color: var(--muted);
+    margin: 0 0 12px;
+    line-height: 1.45;
+}
+
+.ad-banner__actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.ad-banner__cta {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    font-family: var(--font-body);
+    font-weight: 700;
+    font-size: 12.5px;
+    padding: 7px 12px;
+    border-radius: var(--radius-sm);
+    background: var(--ink);
+    color: var(--accent);
+    border: none;
+    text-decoration: none;
+    cursor: pointer;
+    transition: filter 0.15s var(--ease), transform 0.12s var(--ease);
+}
+.ad-banner__cta:hover { filter: brightness(1.25); transform: translateY(-1px); }
+.ad-banner__cta:active { transform: scale(0.96); }
+.ad-banner__cta--ghost {
+    background: transparent;
+    color: var(--copper);
+    border: 1.5px solid var(--line);
+}
+.ad-banner__cta--ghost:hover { border-color: var(--copper); filter: none; transform: none; }
 
 /* ---------- Panel de administración ---------- */
 
