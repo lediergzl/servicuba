@@ -6,7 +6,7 @@ from geoalchemy2 import Geography
 from geoalchemy2.functions import ST_DWithin, ST_Distance, ST_SetSRID, ST_MakePoint, ST_X, ST_Y
 from ..database import get_db
 from ..models.task import Task, TaskStatus
-from ..models.user import User
+from ..models.user import User, UserPlan
 from ..schemas.task import TaskCreate, TaskUpdate, TaskResponse
 from ..services.auth import get_current_user
 from ..services.plans import is_premium_active, PLAN_GRATIS_RADIO_MAX_KM, PLAN_PREMIUM_RADIO_MAX_KM
@@ -75,23 +75,40 @@ def get_nearby_tasks(
     geo_task = cast(Task.ubicacion, Geography)
     geo_point = cast(point, Geography)
     now = datetime.utcnow()
-    query = db.query(
-        Task,
-        ST_Distance(geo_task, geo_point).label("distance"),
-        ST_Y(Task.ubicacion).label("task_lat"),
-        ST_X(Task.ubicacion).label("task_lng"),
-    ).filter(
-        Task.estado == TaskStatus.ACTIVA,
-        ST_DWithin(geo_task, geo_point, radius_m)
+
+    # Pin dorado automático del plan "ServiCuba Pro" (mismo mecanismo que
+    # /tasks/ofertas/nearby en services/nearby.py — ver la nota grande
+    # ahí sobre por qué se calcula en SQL y por qué se combina con la
+    # destacada pagada en vez de reemplazarla).
+    publicador_premium = (
+        (User.plan == UserPlan.PREMIUM)
+        & (User.plan_expira.isnot(None))
+        & (User.plan_expira > now)
+    )
+
+    query = (
+        db.query(
+            Task,
+            ST_Distance(geo_task, geo_point).label("distance"),
+            ST_Y(Task.ubicacion).label("task_lat"),
+            ST_X(Task.ubicacion).label("task_lng"),
+            publicador_premium.label("publicador_premium"),
+        )
+        .join(User, User.id == Task.cliente_id)
+        .filter(
+            Task.estado == TaskStatus.ACTIVA,
+            ST_DWithin(geo_task, geo_point, radius_m),
+        )
     )
     if category_id:
         query = query.filter(Task.categoria_id == category_id)
-    # Las tareas destacadas (pagas) aparecen primero; dentro de cada grupo,
-    # ordena por cercanía.
-    destacada_activa = (Task.destacada == True) & (Task.destacada_hasta > now)  # noqa: E712
-    results = query.order_by(destacada_activa.desc(), "distance").limit(50).all()
+    # Las tareas destacadas (pagas o por plan Premium del publicador)
+    # aparecen primero; dentro de cada grupo, ordena por cercanía.
+    destacada_pagada = (Task.destacada == True) & (Task.destacada_hasta > now)  # noqa: E712
+    boost_activo = destacada_pagada | publicador_premium
+    results = query.order_by(boost_activo.desc(), "distance").limit(50).all()
     tasks = []
-    for task, dist, task_lat, task_lng in results:
+    for task, dist, task_lat, task_lng, premium in results:
         tasks.append({
             "id": task.id,
             "titulo": task.titulo,
@@ -99,7 +116,10 @@ def get_nearby_tasks(
             "distancia_km": round(dist / 1000, 2),
             "categoria_id": task.categoria_id,
             "estado": task.estado.value,
-            "destacada": bool(task.destacada and task.destacada_hasta and task.destacada_hasta > now),
+            "destacada": bool(
+                (task.destacada and task.destacada_hasta and task.destacada_hasta > now)
+                or premium
+            ),
             "created_at": task.created_at,
             "lat": task_lat,
             "lng": task_lng,
@@ -125,6 +145,13 @@ def get_my_tasks(
         .order_by(Task.created_at.desc())
         .all()
     )
+
+    now = datetime.utcnow()
+    # Todas estas tareas las publicó current_user, así que su estado
+    # Premium se evalúa UNA sola vez (no por fila, a diferencia de
+    # get_nearby_tasks/find_nearby donde el publicador varía por
+    # resultado) — ver is_premium_active() en services/plans.py.
+    publicador_premium = is_premium_active(current_user)
 
     result = []
     for task in tasks:
@@ -158,7 +185,15 @@ def get_my_tasks(
             "zona": task.zona,
             "referencia": task.referencia,
             "estado": task.estado.value,
-            "destacada": task.destacada,
+            # true si pagó por destacarla O si el plan Premium se la da
+            # gratis — tasks.js ya usa este mismo campo para decidir si
+            # mostrar el botón "★ Destacar" (canFeature = activa &&
+            # !destacada), así que un trabajador Premium deja de ver ese
+            # botón en sus propias publicaciones sin tocar el frontend.
+            "destacada": bool(
+                (task.destacada and task.destacada_hasta and task.destacada_hasta > now)
+                or publicador_premium
+            ),
             "destacada_hasta": task.destacada_hasta,
             "created_at": task.created_at,
             "trabajador_id": worker_id,
@@ -236,6 +271,11 @@ def get_my_ofertas(
         .all()
     )
 
+    now = datetime.utcnow()
+    # Mismo motivo que en get_my_tasks: el publicador de TODAS estas
+    # ofertas es siempre current_user, así que se evalúa una sola vez.
+    publicador_premium = is_premium_active(current_user)
+
     result = []
     for oferta in ofertas:
         # Nombre del CLIENTE cuya solicitud fue aceptada (si lo hay) —
@@ -265,7 +305,12 @@ def get_my_ofertas(
             "zona": oferta.zona,
             "referencia": oferta.referencia,
             "estado": oferta.estado.value,
-            "destacada": oferta.destacada,
+            # Pin dorado automático del plan Pro — ver comentario
+            # equivalente en get_my_tasks() más arriba.
+            "destacada": bool(
+                (oferta.destacada and oferta.destacada_hasta and oferta.destacada_hasta > now)
+                or publicador_premium
+            ),
             "destacada_hasta": oferta.destacada_hasta,
             "created_at": oferta.created_at,
             "cliente_solicitante_id": cliente_solicitante_id,

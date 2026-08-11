@@ -4,7 +4,12 @@ tocar los routers.
 """
 
 # ---------- Plan de trabajador ----------
-PLAN_GRATIS_POSTULACIONES_SEMANA = 3   # None = ilimitado
+# Antes: 3. Se sube a 5 (checklist "Plan ServiCuba Pro": postulaciones
+# ilimitadas "vs. 5 gratis") — el límite gratis y el beneficio premium
+# (ilimitado, ver is_premium_active() más abajo y su uso en
+# routers/applications.py) ya existían por separado; sólo cambia el
+# número del plan gratis.
+PLAN_GRATIS_POSTULACIONES_SEMANA = 5   # None = ilimitado
 PLAN_GRATIS_RADIO_MAX_KM = 3.0
 PLAN_PREMIUM_RADIO_MAX_KM = 50.0
 
