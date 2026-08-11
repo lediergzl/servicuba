@@ -9,3 +9,4 @@ from .push import router as push_router
 from .verification import router as verification_router
 from .payments import router as payments_router
 from .ads import router as ads_router
+from .password_reset import router as password_reset_router

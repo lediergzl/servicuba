@@ -1,7 +1,7 @@
 // ============================================================
 // Registro / Login / Logout
 // ============================================================
-import { apiFetch, notify, getGeolocation } from './core.js';
+import { apiFetch, notify, showFormModal, getGeolocation } from './core.js';
 import { switchView } from './tasks.js';
 
 export let currentUser = null;
@@ -105,6 +105,81 @@ export function initAuth() {
             btn.textContent = originalText;
         } finally {
             btn.disabled = false;
+        }
+    });
+
+    initForgotPassword();
+}
+
+// ---------- Recuperar contraseña ----------
+// Flujo en dos pasos (mismo patrón que verification.js): se pide el
+// teléfono, el backend genera un código de un solo uso (sin pasarela SMS
+// conectada todavía, así que se devuelve en la respuesta sólo para poder
+// probar el flujo de punta a punta — ver routers/password_reset.py), y
+// luego se pide el código + la nueva contraseña.
+function initForgotPassword() {
+    document.getElementById('forgotPasswordBtn')?.addEventListener('click', async () => {
+        const step1 = await showFormModal({
+            title: 'Recuperar contraseña',
+            confirmLabel: 'Enviar código',
+            fields: [
+                { name: 'telefono', label: 'Teléfono', type: 'tel', required: true }
+            ]
+        });
+        if (step1 === null) return;
+
+        let resp;
+        try {
+            resp = await apiFetch('/auth/forgot-password', {
+                method: 'POST',
+                body: JSON.stringify({ telefono: step1.telefono })
+            });
+        } catch (err) {
+            notify(`Error: ${err.message}`, 'error');
+            return;
+        }
+
+        // El backend nunca revela si el teléfono existe o no (evita
+        // enumerar cuentas) — sólo devuelve codigo_demo cuando sí existe.
+        if (resp.codigo_demo) {
+            notify(`Código de recuperación (demo): ${resp.codigo_demo}`, 'info');
+        } else {
+            notify(resp.message, 'info');
+        }
+
+        const step2 = await showFormModal({
+            title: 'Nueva contraseña',
+            confirmLabel: 'Restablecer',
+            fields: [
+                {
+                    name: 'codigo',
+                    label: `Código de 6 dígitos (válido ${resp.expira_en_minutos} min)`,
+                    type: 'text',
+                    required: true,
+                    placeholder: '123456'
+                },
+                {
+                    name: 'nueva_password',
+                    label: 'Nueva contraseña',
+                    type: 'password',
+                    required: true
+                }
+            ]
+        });
+        if (step2 === null) return;
+
+        try {
+            await apiFetch('/auth/reset-password', {
+                method: 'POST',
+                body: JSON.stringify({
+                    telefono: step1.telefono,
+                    codigo: step2.codigo.trim(),
+                    nueva_password: step2.nueva_password
+                })
+            });
+            notify('Contraseña actualizada. Ya puedes iniciar sesión.', 'success');
+        } catch (err) {
+            notify(`Error: ${err.message}`, 'error');
         }
     });
 }

@@ -4,7 +4,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.staticfiles import StaticFiles
-from .routers import auth, users, categories, tasks, applications, reviews, chat, push, verification, payments, ads
+from .routers import auth, users, categories, tasks, applications, reviews, chat, push, verification, payments, ads, password_reset
 from .database import engine, Base, SessionLocal
 from .models.category import Category
 from .models.user import User, UserRole
@@ -116,6 +116,17 @@ with engine.connect() as conn:
     conn.execute(text(
         "ALTER TABLE users ADD COLUMN IF NOT EXISTS verificado BOOLEAN DEFAULT false"
     ))
+    # Recuperación de contraseña — mismo patrón que codigo_verificacion/
+    # codigo_verificacion_expira de arriba (ver routers/password_reset.py).
+    # Sin esto, una base de datos ya desplegada rompería con
+    # ResponseValidationError/AttributeError en cuanto se usara el nuevo
+    # flujo de "olvidé mi contraseña" contra una fila vieja.
+    conn.execute(text(
+        "ALTER TABLE users ADD COLUMN IF NOT EXISTS codigo_reset_password VARCHAR(10)"
+    ))
+    conn.execute(text(
+        "ALTER TABLE users ADD COLUMN IF NOT EXISTS codigo_reset_password_expira TIMESTAMP"
+    ))
     conn.execute(text(
         "ALTER TABLE tasks ADD COLUMN IF NOT EXISTS destacada BOOLEAN NOT NULL DEFAULT false"
     ))
@@ -197,6 +208,7 @@ if settings.ADMIN_PHONE and settings.ADMIN_PASSWORD:
         db.commit()
 
 app.include_router(auth.router, prefix="/api/auth", tags=["Auth"])
+app.include_router(password_reset.router, prefix="/api/auth", tags=["Auth"])
 app.include_router(users.router, prefix="/api/users", tags=["Users"])
 app.include_router(categories.router, prefix="/api/categories", tags=["Categories"])
 app.include_router(tasks.router, prefix="/api/tasks", tags=["Tasks"])

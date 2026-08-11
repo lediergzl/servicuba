@@ -66,6 +66,17 @@ class User(Base):
     verificado = Column(Boolean, default=False)
     codigo_verificacion = Column(String(10), nullable=True)
     codigo_verificacion_expira = Column(DateTime, nullable=True)
+
+    # ---------- Recuperación de contraseña ----------
+    # Mismo patrón que codigo_verificacion/codigo_verificacion_expira de
+    # arriba (código de un solo uso con TTL) — ver routers/password_reset.py.
+    # No hay pasarela SMS conectada todavía (igual que verification.py),
+    # así que el endpoint devuelve el código en la respuesta sólo para
+    # poder probar el flujo de punta a punta mientras no exista un
+    # proveedor real.
+    codigo_reset_password = Column(String(10), nullable=True)
+    codigo_reset_password_expira = Column(DateTime, nullable=True)
+
     plan = Column(Enum(UserPlan), default=UserPlan.GRATIS, nullable=False)
     plan_expira = Column(DateTime, nullable=True)
     es_admin = Column(Boolean, default=False, nullable=False)
