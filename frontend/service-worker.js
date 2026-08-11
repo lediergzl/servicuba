@@ -5,7 +5,10 @@
 // disparaba 'install' — el navegador seguía sirviendo los JS viejos desde
 // caché indefinidamente, aunque el servidor ya tuviera el código nuevo.
 // v8: se agregó frontend/js/landing.js (buscador instantáneo del hero).
-const CACHE_VERSION = 'v8';
+// v9: fix en tasks.js — la ubicación GPS se pide en paralelo al llenar
+// el formulario de "Nueva tarea"/"Publicar servicio", con reintento sin
+// perder los datos si falla (antes se perdía todo lo escrito).
+const CACHE_VERSION = 'v9';
 const CACHE_NAME = `servicuba-${CACHE_VERSION}`;
 
 const urlsToCache = [
