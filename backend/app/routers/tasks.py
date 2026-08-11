@@ -22,8 +22,15 @@ def create_task(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    if current_user.rol.value != "cliente":
-        raise HTTPException(status_code=403, detail="Solo clientes pueden crear tareas")
+    # Antes: `current_user.rol.value != "cliente"`. `rol` es el campo
+    # DEPRECADO de antes de la dualidad de roles (ver models/user.py) y
+    # el registro ya NO lo asigna — queda en None para toda cuenta nueva.
+    # Eso hacía que ESTA línea rompiera con AttributeError
+    # ("'NoneType' object has no attribute 'value'") en cada intento de
+    # crear una tarea, así que ninguna tarea llegaba nunca a guardarse en
+    # la base de datos (de ahí que nunca aparecieran en "cercanas"/mapa).
+    if not current_user.es_cliente:
+        raise HTTPException(status_code=403, detail="Activa tu perfil de cliente para crear tareas")
     point = ST_SetSRID(ST_MakePoint(task.lng, task.lat), 4326)
     db_task = Task(
         cliente_id=current_user.id,
