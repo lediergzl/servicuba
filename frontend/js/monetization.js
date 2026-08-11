@@ -169,15 +169,54 @@ export function initSponsorAdEntry() {
 }
 
 // ---------- Banner de anuncio de marca ----------
+// Antes loadAdBanner() se llamaba UNA sola vez al entrar a la vista y el
+// banner quedaba fijo ahí para siempre — la única forma de ver otro
+// anuncio patrocinado era recargar toda la página (F5). Ahora rota solo,
+// pidiendo un anuncio nuevo cada AD_ROTATION_MS mientras el contenedor
+// siga existiendo Y esté realmente visible en pantalla.
+//
+// El "realmente visible" importa porque GET /ads/active cuenta una
+// impresión en el servidor CADA VEZ que se llama (ver routers/ads.py) —
+// si siguiéramos pidiendo en segundo plano mientras el usuario está en
+// otra vista (chat, perfil, etc.), el contador de impresiones que ve el
+// anunciante quedaría inflado con vistas que nunca ocurrieron.
 
-export async function loadAdBanner(containerId, categoryId = null) {
+const AD_ROTATION_MS = 25000;
+// containerId -> intervalId, para poder cancelar un timer anterior si
+// loadAdBanner se vuelve a llamar sobre el mismo contenedor (evita
+// timers duplicados acumulándose en cada cambio de modo/vista).
+const _adRotationTimers = new Map();
+
+// containerId -> Set de ids de anuncio ya mostrados en el ciclo actual.
+// Se manda como ?excluir=id1,id2,... para que el backend elija entre los
+// que faltan (ver GET /ads/active en routers/ads.py) — así no se repite
+// un anuncio hasta que se hayan mostrado todos los activos.
+const _adShownIds = new Map();
+
+function isElementVisible(el) {
+    // offsetParent es null cuando el elemento (o un ancestro) tiene
+    // display:none — que es exactamente cómo se ocultan las vistas acá
+    // (.hidden { display: none !important }, ver style.css). Los
+    // contenedores de vista NUNCA se sacan del DOM, sólo se ocultan, así
+    // que document.getElementById seguiría encontrándolos aunque el
+    // usuario esté mirando otra pantalla.
+    return !!el && el.offsetParent !== null;
+}
+
+async function fetchAndRenderAd(containerId, categoryId) {
     const container = document.getElementById(containerId);
     if (!container) return;
 
+    const shown = _adShownIds.get(containerId) || new Set();
+
+    const searchParams = new URLSearchParams();
+    if (categoryId) searchParams.set('category_id', categoryId);
+    if (shown.size) searchParams.set('excluir', [...shown].join(','));
+    const qs = searchParams.toString();
+
     let ad;
     try {
-        const params = categoryId ? `?category_id=${encodeURIComponent(categoryId)}` : '';
-        ad = await apiFetch(`/ads/active${params}`);
+        ad = await apiFetch(`/ads/active${qs ? `?${qs}` : ''}`);
     } catch {
         container.innerHTML = '';
         return;
@@ -187,6 +226,15 @@ export async function loadAdBanner(containerId, categoryId = null) {
         container.innerHTML = '';
         return;
     }
+
+    if (shown.has(ad.id)) {
+        // El backend ya reinició el ciclo (mostró todos los que
+        // teníamos anotados) — empezamos un ciclo de exclusión nuevo
+        // desde este anuncio, en vez de seguir arrastrando el anterior.
+        shown.clear();
+    }
+    shown.add(ad.id);
+    _adShownIds.set(containerId, shown);
 
     container.innerHTML = `
         <div class="ad-banner" role="complementary" aria-label="Anuncio">
@@ -210,4 +258,38 @@ export async function loadAdBanner(containerId, categoryId = null) {
             }
         });
     }
+}
+
+export async function loadAdBanner(containerId, categoryId = null) {
+    const container = document.getElementById(containerId);
+    if (!container) return;
+
+    await fetchAndRenderAd(containerId, categoryId);
+
+    // Si ya había un timer de rotación corriendo para este mismo
+    // contenedor (ej. el usuario cambió de modo Cliente/Trabajador y
+    // volvió), lo cancelamos antes de crear uno nuevo.
+    if (_adRotationTimers.has(containerId)) {
+        clearInterval(_adRotationTimers.get(containerId));
+        _adRotationTimers.delete(containerId);
+    }
+
+    const intervalId = setInterval(() => {
+        const el = document.getElementById(containerId);
+        if (!el) {
+            // La vista ya no existe (no debería pasar, pero por las
+            // dudas) — dejamos de sondear.
+            clearInterval(intervalId);
+            _adRotationTimers.delete(containerId);
+            return;
+        }
+        if (!isElementVisible(el)) {
+            // El usuario está en otra vista ahora mismo: no pedimos el
+            // anuncio (evita inflar impresiones), pero seguimos el
+            // timer corriendo para retomar solo cuando vuelva.
+            return;
+        }
+        fetchAndRenderAd(containerId, categoryId);
+    }, AD_ROTATION_MS);
+    _adRotationTimers.set(containerId, intervalId);
 }
