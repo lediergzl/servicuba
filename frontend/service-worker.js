@@ -4,7 +4,8 @@
 // byte a byte, un deploy que sólo tocara tasks.js/core.js/etc. nunca
 // disparaba 'install' — el navegador seguía sirviendo los JS viejos desde
 // caché indefinidamente, aunque el servidor ya tuviera el código nuevo.
-const CACHE_VERSION = 'v7';
+// v8: se agregó frontend/js/landing.js (buscador instantáneo del hero).
+const CACHE_VERSION = 'v8';
 const CACHE_NAME = `servicuba-${CACHE_VERSION}`;
 
 const urlsToCache = [
@@ -22,6 +23,7 @@ const urlsToCache = [
   '/js/admin.js',
   '/js/map.js',
   '/js/utils.js',
+  '/js/landing.js',
   '/manifest.json',
   '/assets/icons/icon-192.png',
   '/assets/icons/icon-512.png'
