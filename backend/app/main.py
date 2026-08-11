@@ -1,3 +1,5 @@
+import asyncio
+import logging
 from pathlib import Path
 from sqlalchemy import text
 from fastapi import FastAPI
@@ -10,8 +12,10 @@ from .models.category import Category
 from .models.user import User, UserRole
 from .config import get_settings
 from .utils.security import get_password_hash
+from .services.notificaciones import procesar_notificaciones_pendientes
 
 settings = get_settings()
+logger = logging.getLogger("notificaciones")
 
 app = FastAPI(title="Servicios Locales API", version="1.0.0")
 
@@ -161,6 +165,11 @@ with engine.connect() as conn:
     conn.execute(text(
         "ALTER TABLE ads ADD COLUMN IF NOT EXISTS contacto VARCHAR(50)"
     ))
+    # NOTA: pending_notifications (cola de avisos push retrasados del
+    # plan gratis — ver models/pending_notification.py) es una tabla
+    # NUEVA, no una columna agregada a una tabla vieja: create_all() de
+    # arriba ya la crea sola en cualquier base de datos (nueva o
+    # existente) que todavía no la tenga. No necesita un ALTER TABLE acá.
     # ---------- Índices para /api/tasks/nearby ----------
     # Esa consulta filtra por Task.estado y castea Task.ubicacion a
     # geography para usar ST_DWithin/ST_Distance (ver routers/tasks.py).
@@ -237,6 +246,34 @@ app.include_router(ads.router, prefix="/api/ads", tags=["Ads"])
 @app.get("/api/health")
 def health():
     return {"message": "Plataforma de Servicios Locales - API"}
+
+# ---------- Loop de background: cola de avisos push retrasados ----------
+# Beneficio "prioridad en notificaciones" del plan Pro (ver
+# services/notificaciones.py y services/plans.py): los avisos a
+# trabajadores del plan gratis se encolan en la tabla
+# pending_notifications en vez de mandarse al toque, y este loop los
+# revisa y despacha periódicamente. Vive como una tarea de asyncio en el
+# mismo proceso (no hay un worker/cron separado en este despliegue de
+# Render) — pero como el ESTADO vive en la tabla (no en memoria), un
+# redeploy/reinicio a mitad de la espera no pierde ningún aviso: el loop
+# vuelve a arrancar solo al iniciar el proceso y despacha de inmediato
+# cualquier fila cuyo enviar_en ya haya pasado mientras estuvo caído.
+NOTIFICACIONES_INTERVALO_SEGUNDOS = 60
+
+async def _bucle_notificaciones_pendientes():
+    while True:
+        await asyncio.sleep(NOTIFICACIONES_INTERVALO_SEGUNDOS)
+        db = SessionLocal()
+        try:
+            procesar_notificaciones_pendientes(db)
+        except Exception:
+            logger.exception("Fallo procesando la cola de notificaciones pendientes")
+        finally:
+            db.close()
+
+@app.on_event("startup")
+async def _iniciar_bucle_notificaciones():
+    asyncio.create_task(_bucle_notificaciones_pendientes())
 
 # Sirve el frontend (index.html, css/, js/, manifest.json, etc.) como un
 # único servicio web — así las rutas relativas /api/... del frontend

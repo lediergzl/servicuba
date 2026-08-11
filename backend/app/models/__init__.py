@@ -7,3 +7,4 @@ from .message import Message
 from .push_subscription import PushSubscription
 from .payment import Payment
 from .ad import Ad
+from .pending_notification import PendingNotification

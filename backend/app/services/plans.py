@@ -17,6 +17,13 @@ PRECIO_SUSCRIPCION_PREMIUM = 5.0       # por ciclo
 SUSCRIPCION_PREMIUM_DIAS = 30
 MONEDA_DEFECTO = "USD"
 
+# Prioridad en notificaciones push (checklist "Plan ServiCuba Pro"): al
+# publicarse una tarea nueva, los trabajadores Premium de esa categoría
+# se avisan al instante; los del plan gratis, este número de minutos
+# después — ver services/notificaciones.py. Le da al plan Pro una
+# ventana real de ventaja para postularse antes que nadie.
+PUSH_PRIORIDAD_PREMIUM_MINUTOS = 15
+
 # ---------- Tareas destacadas ----------
 PRECIO_TAREA_DESTACADA = 2.0
 TAREA_DESTACADA_DIAS = 7

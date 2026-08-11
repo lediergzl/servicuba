@@ -11,9 +11,12 @@ from ..schemas.task import TaskCreate, TaskUpdate, TaskResponse
 from ..services.auth import get_current_user
 from ..services.plans import is_premium_active, PLAN_GRATIS_RADIO_MAX_KM, PLAN_PREMIUM_RADIO_MAX_KM
 from ..services.nearby import find_nearby
+from ..services.notificaciones import notificar_nuevos_trabajadores_cercanos
 from uuid import UUID
 from typing import Optional
+import logging
 
+logger = logging.getLogger("tasks")
 router = APIRouter()
 
 @router.post("", response_model=TaskResponse)
@@ -47,6 +50,18 @@ def create_task(
     db.add(db_task)
     db.commit()
     db.refresh(db_task)
+
+    # Aviso push a trabajadores de la categoría/zona — Premium al
+    # instante, plan gratis con retraso (ver services/notificaciones.py
+    # para el detalle del beneficio "prioridad en notificaciones" del
+    # plan Pro). No debe poder tumbar la creación de la tarea si algo
+    # falla acá (ej. un problema puntual de red al mandar un push); la
+    # tarea ya se guardó, así que se aísla en su propio try/except.
+    try:
+        notificar_nuevos_trabajadores_cercanos(db, db_task, task.lat, task.lng)
+    except Exception:
+        logger.warning("No se pudo notificar a trabajadores cercanos de la tarea %s", db_task.id, exc_info=True)
+
     return db_task
 
 @router.get("/nearby")
