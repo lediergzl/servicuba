@@ -1,4 +1,4 @@
-// Sube este número en CADA deploy que toque archivos de frontend/js o
+// Sube este número en CADA deploy que toque archivos de frontend/js o 
 // frontend/css. Antes CACHE_NAME quedaba fijo entre despliegues: como el
 // navegador sólo re-instala el service worker cuando ESTE archivo cambia
 // byte a byte, un deploy que sólo tocara tasks.js/core.js/etc. nunca
