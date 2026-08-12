@@ -9,7 +9,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import JSONResponse
-from .routers import auth, users, categories, tasks, applications, reviews, chat, push, verification, payments, ads, password_reset, task_lifecycle
+from .routers import auth, users, categories, tasks, applications, reviews, chat, push, verification, payments, ads, password_reset, task_lifecycle, admin
 from .database import engine, Base, SessionLocal
 from .models.category import Category
 from .models.user import User, UserRole
@@ -42,9 +42,8 @@ _rate_events = defaultdict(deque)
 
 
 def _client_key(request: Request) -> str:
-    forwarded = request.headers.get("x-forwarded-for")
-    if forwarded:
-        return forwarded.split(",")[0].strip()
+    # Prefer the ASGI peer address. We deliberately do not trust an arbitrary
+    # X-Forwarded-For header supplied by the client because it is spoofable.
     return request.client.host if request.client else "unknown"
 
 
@@ -154,6 +153,7 @@ app.include_router(push.router, prefix="/api/push", tags=["Push"])
 app.include_router(verification.router, prefix="/api/verification", tags=["Verification"])
 app.include_router(payments.router, prefix="/api/payments", tags=["Payments"])
 app.include_router(ads.router, prefix="/api/ads", tags=["Ads"])
+app.include_router(admin.router, prefix="/api/admin", tags=["Admin"])
 
 @app.get("/api/health")
 def health():
