@@ -8,7 +8,7 @@ from ..models.task import Task, TaskStatus
 from ..models.application import Application, AppStatus
 from ..models.message import Message
 from ..models.user import User
-from ..schemas.message import MessageCreate, MessageResponse
+from ..schemas.message import MessageResponse
 from ..services.auth import get_current_user
 from ..services.ws_manager import manager
 from ..services.push_service import send_push_to_user
@@ -16,9 +16,18 @@ from ..utils.security import decode_token
 
 router = APIRouter()
 
+# A conversation remains readable after completion, but sending is only
+# allowed while the service relationship is active.  CONFIRMADA and
+# CANCELADA are terminal states for chat writes.
+CHAT_WRITE_STATES = {
+    TaskStatus.ASIGNADA,
+    TaskStatus.EN_PROCESO,
+    TaskStatus.COMPLETADA,
+}
+
 
 def _task_participant_ids(db: Session, task: Task) -> set:
-    """cliente + trabajador(es) con postulación aceptada para esa tarea."""
+    """cliente + trabajador(es) with an accepted application for the task."""
     worker_ids = {
         row.worker_id
         for row in db.query(Application.worker_id)
@@ -32,9 +41,19 @@ def _ensure_participant(db: Session, task_id: UUID, user: User) -> Task:
     task = db.query(Task).filter(Task.id == task_id).first()
     if not task:
         raise HTTPException(status_code=404, detail="Tarea no encontrada")
+    if getattr(user, "suspendido", False):
+        raise HTTPException(status_code=403, detail="Cuenta suspendida")
     if user.id not in _task_participant_ids(db, task):
         raise HTTPException(status_code=403, detail="No participas en el chat de esta tarea")
     return task
+
+
+def _ensure_chat_write_allowed(task: Task) -> None:
+    if task.estado not in CHAT_WRITE_STATES:
+        raise HTTPException(
+            status_code=409,
+            detail="El chat está cerrado porque el servicio ya terminó o fue cancelado",
+        )
 
 
 @router.get("/conversations")
@@ -42,13 +61,16 @@ def get_conversations(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Lista las tareas donde el usuario tiene un chat activo (cliente con
-    trabajador asignado, o trabajador con postulación aceptada), con el
-    último mensaje y el conteo de no leídos — para la pestaña 'Mensajes'."""
+    """Lista las tareas donde el usuario tiene un chat activo o histórico."""
     as_client_ids = {
         row.id for row in db.query(Task.id).filter(
             Task.cliente_id == current_user.id,
-            Task.estado.in_([TaskStatus.ASIGNADA, TaskStatus.EN_PROCESO, TaskStatus.COMPLETADA]),
+            Task.estado.in_([
+                TaskStatus.ASIGNADA,
+                TaskStatus.EN_PROCESO,
+                TaskStatus.COMPLETADA,
+                TaskStatus.CONFIRMADA,
+            ]),
         ).all()
     }
     as_worker_ids = {
@@ -93,6 +115,7 @@ def get_conversations(
             "ultimo_mensaje": last_msg.contenido if last_msg else None,
             "ultimo_mensaje_fecha": last_msg.created_at.isoformat() if last_msg else None,
             "no_leidos": unread,
+            "puede_enviar": task.estado in CHAT_WRITE_STATES and not getattr(current_user, "suspendido", False),
         })
     result.sort(key=lambda c: c["ultimo_mensaje_fecha"] or "", reverse=True)
     return result
@@ -111,7 +134,6 @@ def get_messages(
         .order_by(Message.created_at.asc())
         .all()
     )
-    # Marcar como leídos los mensajes que no envió el usuario actual
     changed = False
     for m in messages:
         if m.sender_id != current_user.id and not m.leido:
@@ -133,7 +155,7 @@ async def chat_websocket(websocket: WebSocket, task_id: UUID):
     db = SessionLocal()
     try:
         user = db.query(User).filter(User.id == payload.get("sub")).first()
-        if not user:
+        if not user or getattr(user, "suspendido", False):
             await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
             return
         task = db.query(Task).filter(Task.id == task_id).first()
@@ -145,9 +167,32 @@ async def chat_websocket(websocket: WebSocket, task_id: UUID):
         try:
             while True:
                 data = await websocket.receive_json()
+
+                # Re-read the task on every write. This closes an important
+                # TOCTOU gap: a websocket may remain open while another
+                # request changes the task to CONFIRMADA/CANCELADA.
+                task = db.query(Task).filter(Task.id == task_id).first()
+                if not task:
+                    await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
+                    break
+                if getattr(user, "suspendido", False):
+                    await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
+                    break
+                if task.estado not in CHAT_WRITE_STATES:
+                    await websocket.send_json({
+                        "error": "chat_closed",
+                        "detail": "El chat está cerrado porque el servicio ya terminó o fue cancelado",
+                    })
+                    await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
+                    break
+                if user.id not in _task_participant_ids(db, task):
+                    await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
+                    break
+
                 contenido = (data.get("contenido") or "").strip()
                 if not contenido:
                     continue
+
                 msg = Message(task_id=task_id, sender_id=user.id, contenido=contenido[:2000])
                 db.add(msg)
                 db.commit()
@@ -163,8 +208,6 @@ async def chat_websocket(websocket: WebSocket, task_id: UUID):
                 }
                 await manager.broadcast(task_id, payload_out)
 
-                # Avisar por push a los participantes que no están conectados
-                # al chat de esta tarea en este momento.
                 for participant_id in _task_participant_ids(db, task):
                     if participant_id == user.id:
                         continue
