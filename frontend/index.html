@@ -133,10 +133,10 @@
                     <button class="sub-tab is-active" data-clientetab="tareas" type="button">Mis tareas</button>
                     <button class="sub-tab" data-clientetab="ofertas" type="button">Ofertas cercanas</button>
                 </div>
-                <div id="misTareasPanel">
+                <div id="misTareasPanel" class="subtab-panel">
                     <div id="misTareas" class="stack-sm"></div>
                 </div>
-                <div id="ofertasCercanasPanel" class="hidden">
+                <div id="ofertasCercanasPanel" class="subtab-panel hidden">
                     <div class="filter-row">
                         <select id="filtroRadioOfertas" class="field-input field-input--auto">
                             <option value="1">1 km</option>
@@ -162,7 +162,7 @@
                     <button class="sub-tab is-active" data-trabajadortab="cercanas" type="button">Tareas cercanas</button>
                     <button class="sub-tab" data-trabajadortab="ofertas" type="button">Mis ofertas</button>
                 </div>
-                <div id="tareasCercanasPanel">
+                <div id="tareasCercanasPanel" class="subtab-panel">
                     <div id="adBannerTrabajador"></div>
                     <div class="filter-row">
                         <select id="filtroRadio" class="field-input field-input--auto">
@@ -178,11 +178,11 @@
                     <div id="listaTareas" class="stack-sm"></div>
                     <button id="toggleMapBtn" class="btn btn-secondary btn-block mt-md">
                         <svg class="icon" viewBox="0 0 24 24"><path d="M3 6l6-2 6 2 6-2v14l-6 2-6-2-6 2V6Z"/><path d="M9 4v14M15 6v14"/></svg>
-                        Mostrar mapa
+                        Ver tareas en mapa
                     </button>
                     <div id="map" class="hidden map-box"></div>
                 </div>
-                <div id="misOfertasPanel" class="hidden">
+                <div id="misOfertasPanel" class="subtab-panel hidden">
                     <div id="misOfertas" class="stack-sm"></div>
                 </div>
             </div>

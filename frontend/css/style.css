@@ -153,6 +153,20 @@ h1, h2, h3 {
 
 /* ---------- Vistas ---------- */
 
+/* Microinteracción: cada vez que una vista pasa de "hidden" a visible,
+   esta animación se reinicia sola (los navegadores reinician las
+   animaciones CSS declaradas cuando un elemento vuelve a mostrarse
+   desde display:none) — no hace falta tocar JS en switchView() para
+   lograr una transición suave entre pantallas en vez del salto seco de
+   antes. prefers-reduced-motion ya la neutraliza arriba (regla global). */
+.view {
+    animation: view-in 0.32s var(--ease);
+}
+@keyframes view-in {
+    from { opacity: 0; transform: translateY(10px); }
+    to { opacity: 1; transform: none; }
+}
+
 .view-title {
     font-size: 26px;
     margin-bottom: 4px;
@@ -185,6 +199,14 @@ h1, h2, h3 {
 .stack-md > * + * { margin-top: 12px; }
 .mt-md { margin-top: 16px; }
 
+/* Sub-paneles dentro de un dashboard (ej. "Mis tareas" / "Ofertas
+   cercanas"): mismo criterio que .view — al quitarles .hidden entran
+   con un fade+slide corto en vez de aparecer de golpe, así cambiar de
+   sub-pestaña se siente igual de fluido que cambiar de vista completa. */
+.subtab-panel {
+    animation: view-in 0.28s var(--ease);
+}
+
 /* ---------- Buscador instantáneo del Hero ---------- */
 /* Reemplaza el título/subtítulo genérico de la landing por un buscador
    de oficios con resultados en vivo — ver frontend/js/landing.js. El
@@ -212,6 +234,15 @@ h1, h2, h3 {
     padding: 6px;
     max-height: 280px;
     overflow-y: auto;
+    /* Microinteracción: el dropdown de resultados entra con un fade +
+       leve caída en vez de aparecer instantáneo al tipear — mismo
+       lenguaje de movimiento que los modales (ver modal-in). */
+    animation: hero-results-in 0.16s var(--ease);
+    transform-origin: top center;
+}
+@keyframes hero-results-in {
+    from { opacity: 0; transform: translateY(-4px) scaleY(0.98); }
+    to { opacity: 1; transform: none; }
 }
 
 .hero-search__item {
@@ -231,6 +262,7 @@ h1, h2, h3 {
 .hero-search__item:hover,
 .hero-search__item:focus-visible { background: var(--paper); }
 .hero-search__item + .hero-search__item { margin-top: 2px; }
+.hero-search__item:active { transform: scale(0.98); }
 
 .hero-search__item-icon {
     flex-shrink: 0;
@@ -314,6 +346,7 @@ h1, h2, h3 {
     border-radius: var(--radius-sm);
     background: var(--paper-raised);
     color: var(--ink);
+    transition: border-color 0.15s var(--ease), box-shadow 0.15s var(--ease);
 }
 .field-input:focus {
     outline: none;
@@ -351,6 +384,16 @@ h1, h2, h3 {
     box-shadow: var(--shadow-card);
     border: 1px solid var(--line);
     transition: transform 0.15s var(--ease), box-shadow 0.15s var(--ease);
+    /* Microinteracción: entrada escalonada al renderizar una lista.
+       tasks.js fija --i (índice dentro de la lista) por tarjeta antes de
+       insertarla — sin ese valor cae a 0 y todas entran juntas, así que
+       sigue viéndose bien aunque algún listado nuevo no lo fije. */
+    animation: card-in 0.34s var(--ease) both;
+    animation-delay: calc(var(--i, 0) * 45ms);
+}
+@keyframes card-in {
+    from { opacity: 0; transform: translateY(7px); }
+    to { opacity: 1; transform: none; }
 }
 .task-card:hover { box-shadow: var(--shadow-card-hover); transform: translateY(-2px); }
 .task-card:active { transform: scale(0.99) translateY(0); }
@@ -389,7 +432,7 @@ h1, h2, h3 {
 }
 
 /* Skeletons de carga */
-.skeleton-card { pointer-events: none; }
+.skeleton-card { pointer-events: none; animation: none; }
 .skeleton-line {
     height: 12px;
     border-radius: 6px;
@@ -600,10 +643,12 @@ h1, h2, h3 {
     gap: 3px;
     position: relative;
     cursor: pointer;
-    transition: color 0.15s var(--ease);
+    transition: color 0.15s var(--ease), transform 0.12s var(--ease);
 }
 .bottom-nav__item.is-active { color: var(--accent); }
-.bottom-nav__icon { width: 21px; height: 21px; }
+.bottom-nav__item:active { transform: scale(0.92); }
+.bottom-nav__icon { width: 21px; height: 21px; transition: transform 0.15s var(--ease); }
+.bottom-nav__item.is-active .bottom-nav__icon { transform: translateY(-1px) scale(1.08); }
 
 .badge-count {
     background: var(--brick);
@@ -632,7 +677,10 @@ h1, h2, h3 {
     text-align: left;
     cursor: pointer;
     font-family: var(--font-body);
+    transition: transform 0.12s var(--ease), box-shadow 0.15s var(--ease);
 }
+.conversation-item:hover { box-shadow: var(--shadow-xs); transform: translateY(-1px); }
+.conversation-item:active { transform: scale(0.99); }
 .conversation-item__main { display: flex; flex-direction: column; gap: 2px; overflow: hidden; }
 .conversation-item__title { font-weight: 700; font-size: 14px; }
 .conversation-item__other { font-size: 12px; color: var(--copper); }
@@ -668,6 +716,15 @@ h1, h2, h3 {
     display: flex;
     flex-direction: column;
     gap: 2px;
+    /* Microinteracción: cada mensaje nuevo (propio o recibido) entra con
+       un pop corto en vez de aparecer de golpe al final de la lista —
+       mismo criterio que .task-card, sin necesitar índice porque los
+       mensajes llegan de a uno. */
+    animation: bubble-in 0.22s var(--ease);
+}
+@keyframes bubble-in {
+    from { opacity: 0; transform: translateY(6px) scale(0.98); }
+    to { opacity: 1; transform: none; }
 }
 .chat-bubble--own {
     align-self: flex-end;

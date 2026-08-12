@@ -11,7 +11,15 @@
 // v10: landing.js ahora revisa el token antes de mandar a "Regístrate"
 // (si ya hay sesión, va directo al dashboard) y tasks.js precarga la
 // categoría elegida en el buscador del hero al abrir "Nueva tarea".
-const CACHE_VERSION = 'v10';
+// v11: microinteracciones — transición fade+slide al cambiar de vista y
+// de sub-pestaña (.view / .subtab-panel en style.css), fade-in
+// escalonado de las tarjetas de tarea/oferta al renderizarse (--i por
+// tarjeta, fijado en tasks.js), dropdown del buscador del hero con
+// entrada suave, burbujas de chat con pop de entrada, feedback táctil
+// en bottom-nav y conversation-item. Sólo CSS/JS de frontend, sin
+// cambios de backend. "Mostrar mapa" renombrado a "Ver tareas en mapa"
+// (index.html) para que se entienda qué hace antes de tocarlo.
+const CACHE_VERSION = 'v11';
 const CACHE_NAME = `servicuba-${CACHE_VERSION}`;
 
 const urlsToCache = [

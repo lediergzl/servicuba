@@ -173,10 +173,14 @@ function renderNearbyTasks(tasks) {
         return;
     }
 
-    tasks.forEach(t => {
+    tasks.forEach((t, i) => {
         const yaPostulado = appliedTaskIds.has(String(t.id));
         const card = document.createElement('div');
         card.className = t.destacada ? 'task-card task-card--featured' : 'task-card';
+        // Fade-in escalonado (ver .task-card en style.css): cada tarjeta
+        // arranca su animación un poco después que la anterior en vez de
+        // que la lista entera "salte" de golpe al renderizarse.
+        card.style.setProperty('--i', i);
         card.innerHTML = `
             <div class="task-card__row">
                 <h3 class="task-card__title">${t.destacada ? '★ ' : ''}${escapeHtml(t.titulo)}</h3>
@@ -279,10 +283,11 @@ function renderNearbyOfertas(ofertas) {
         return;
     }
 
-    ofertas.forEach(o => {
+    ofertas.forEach((o, i) => {
         const yaSolicitado = appliedTaskIds.has(String(o.id));
         const card = document.createElement('div');
         card.className = o.destacada ? 'task-card task-card--featured' : 'task-card';
+        card.style.setProperty('--i', i);
         card.innerHTML = `
             <div class="task-card__row">
                 <h3 class="task-card__title">${o.destacada ? '★ ' : ''}${escapeHtml(o.titulo)}</h3>
@@ -494,9 +499,10 @@ async function loadMyTasks() {
         return;
     }
 
-    tasks.forEach(t => {
+    tasks.forEach((t, i) => {
         const card = document.createElement('div');
         card.className = 'task-card';
+        card.style.setProperty('--i', i);
 
         const canChat = t.estado === 'asignada' || t.estado === 'en_proceso' || t.estado === 'completada';
         const canComplete = t.estado === 'asignada' || t.estado === 'en_proceso';
@@ -617,9 +623,10 @@ async function loadMyOfertas() {
         return;
     }
 
-    ofertas.forEach(o => {
+    ofertas.forEach((o, i) => {
         const card = document.createElement('div');
         card.className = 'task-card';
+        card.style.setProperty('--i', i);
 
         const canChat = o.estado === 'asignada' || o.estado === 'en_proceso' || o.estado === 'completada';
         const canComplete = o.estado === 'asignada' || o.estado === 'en_proceso';
