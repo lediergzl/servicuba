@@ -27,41 +27,29 @@ INSTRUCCIONES_PAGO = (
 )
 
 
+def _lock_user(db: Session, user_id):
+    return db.query(User).filter(User.id == user_id).with_for_update().first()
+
+
 @router.get("/pricing")
 def get_pricing():
-    """Antes el precio de cada beneficio (premium, destacar, anuncio) sólo
-    aparecía DESPUÉS de solicitarlo (en el toast de confirmación) — el
-    usuario nunca lo veía antes de decidir. Se expone acá para que el
-    frontend lo muestre de entrada, siempre leyendo de plans.py (la
-    única fuente de verdad de precios) en vez de hardcodear números
-    duplicados en el frontend."""
     return {
         "moneda": MONEDA_DEFECTO,
-        "premium": {
-            "precio": PRECIO_SUSCRIPCION_PREMIUM,
-            "dias": SUSCRIPCION_PREMIUM_DIAS,
-        },
-        "tarea_destacada": {
-            "precio": PRECIO_TAREA_DESTACADA,
-            "dias": TAREA_DESTACADA_DIAS,
-        },
-        "anuncio": {
-            "precio_por_dia": PRECIO_ANUNCIO_POR_DIA,
-        },
+        "premium": {"precio": PRECIO_SUSCRIPCION_PREMIUM, "dias": SUSCRIPCION_PREMIUM_DIAS},
+        "tarea_destacada": {"precio": PRECIO_TAREA_DESTACADA, "dias": TAREA_DESTACADA_DIAS},
+        "anuncio": {"precio_por_dia": PRECIO_ANUNCIO_POR_DIA},
     }
 
 
 @router.post("/subscribe", response_model=PaymentResponse)
-def request_subscription(
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-):
-    # Antes: current_user.rol != UserRole.TRABAJADOR (rol fijo). Con la
-    # dualidad de roles, cualquier usuario con el perfil de trabajador
-    # activo (aunque también sea cliente) puede suscribirse al premium.
+def request_subscription(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     if not current_user.es_trabajador:
         raise HTTPException(status_code=403, detail="Activa tu perfil de trabajador para suscribirte al plan premium")
 
+    # Serialize the check-and-create operation so concurrent requests cannot
+    # create two pending intents for the same subscription.
+    if not _lock_user(db, current_user.id):
+        raise HTTPException(status_code=401, detail="Usuario no encontrado")
     existing = db.query(Payment).filter(
         Payment.user_id == current_user.id,
         Payment.tipo == PaymentType.SUSCRIPCION_TRABAJADOR,
@@ -84,16 +72,22 @@ def request_subscription(
 
 
 @router.post("/feature-task/{task_id}", response_model=PaymentResponse)
-def request_feature_task(
-    task_id: str,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-):
-    task = db.query(Task).filter(Task.id == task_id).first()
+def request_feature_task(task_id: str, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    # The task lock serializes duplicate clicks/requests for the same feature.
+    task = db.query(Task).filter(Task.id == task_id).with_for_update().first()
     if not task:
         raise HTTPException(status_code=404, detail="Tarea no encontrada")
     if task.cliente_id != current_user.id:
         raise HTTPException(status_code=403, detail="No eres el dueño de esta tarea")
+
+    existing = db.query(Payment).filter(
+        Payment.user_id == current_user.id,
+        Payment.tipo == PaymentType.TAREA_DESTACADA,
+        Payment.referencia == str(task_id),
+        Payment.estado == PaymentStatus.PENDIENTE,
+    ).first()
+    if existing:
+        return existing
 
     payment = Payment(
         user_id=current_user.id,
@@ -110,18 +104,11 @@ def request_feature_task(
 
 
 @router.post("/sponsor-ad", response_model=PaymentResponse)
-def request_sponsor_ad(
-    body: SponsorAdRequest,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-):
+def request_sponsor_ad(body: SponsorAdRequest, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     if body.dias < 1 or body.dias > 90:
         raise HTTPException(status_code=400, detail="La duración debe ser entre 1 y 90 días")
     if not body.url_destino and not body.contacto:
-        raise HTTPException(
-            status_code=400,
-            detail="Agrega un enlace o un teléfono/WhatsApp de contacto para que la gente pueda comunicarse.",
-        )
+        raise HTTPException(status_code=400, detail="Agrega un enlace o un teléfono/WhatsApp de contacto para que la gente pueda comunicarse.")
 
     monto = round(PRECIO_ANUNCIO_POR_DIA * body.dias, 2)
     detalle = {
@@ -146,76 +133,63 @@ def request_sponsor_ad(
 
 
 @router.get("/my", response_model=list[PaymentResponse])
-def my_payments(
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-):
-    return (
-        db.query(Payment)
-        .filter(Payment.user_id == current_user.id)
-        .order_by(Payment.created_at.desc())
-        .all()
-    )
+def my_payments(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    return db.query(Payment).filter(Payment.user_id == current_user.id).order_by(Payment.created_at.desc()).all()
 
-
-# ---------- Administración ----------
 
 @router.get("/pending", response_model=list[PaymentResponse])
-def list_pending_payments(
-    db: Session = Depends(get_db),
-    _admin: User = Depends(get_current_admin),
-):
-    return (
-        db.query(Payment)
-        .filter(Payment.estado == PaymentStatus.PENDIENTE)
-        .order_by(Payment.created_at.asc())
-        .all()
-    )
+def list_pending_payments(db: Session = Depends(get_db), _admin: User = Depends(get_current_admin)):
+    return db.query(Payment).filter(Payment.estado == PaymentStatus.PENDIENTE).order_by(Payment.created_at.asc()).all()
 
 
 @router.post("/{payment_id}/confirm", response_model=PaymentResponse)
-def confirm_payment(
-    payment_id: str,
-    db: Session = Depends(get_db),
-    _admin: User = Depends(get_current_admin),
-):
-    payment = db.query(Payment).filter(Payment.id == payment_id).first()
+def confirm_payment(payment_id: str, db: Session = Depends(get_db), _admin: User = Depends(get_current_admin)):
+    # Lock payment before checking status. A concurrent admin confirmation
+    # therefore cannot activate the same benefit twice.
+    payment = db.query(Payment).filter(Payment.id == payment_id).with_for_update().first()
     if not payment:
         raise HTTPException(status_code=404, detail="Pago no encontrado")
     if payment.estado != PaymentStatus.PENDIENTE:
         raise HTTPException(status_code=400, detail="Este pago ya fue procesado")
 
+    now = datetime.utcnow()
     payment.estado = PaymentStatus.CONFIRMADO
-    payment.confirmed_at = datetime.utcnow()
+    payment.confirmed_at = now
 
     if payment.tipo == PaymentType.SUSCRIPCION_TRABAJADOR:
-        user = db.query(User).filter(User.id == payment.user_id).first()
-        if user:
-            base = user.plan_expira if (user.plan == UserPlan.PREMIUM and user.plan_expira and user.plan_expira > datetime.utcnow()) else datetime.utcnow()
-            user.plan = UserPlan.PREMIUM
-            user.plan_expira = base + timedelta(days=SUSCRIPCION_PREMIUM_DIAS)
+        user = db.query(User).filter(User.id == payment.user_id).with_for_update().first()
+        if not user:
+            raise HTTPException(status_code=409, detail="El usuario asociado al pago ya no existe")
+        base = user.plan_expira if (user.plan == UserPlan.PREMIUM and user.plan_expira and user.plan_expira > now) else now
+        user.plan = UserPlan.PREMIUM
+        user.plan_expira = base + timedelta(days=SUSCRIPCION_PREMIUM_DIAS)
 
     elif payment.tipo == PaymentType.TAREA_DESTACADA:
-        task = db.query(Task).filter(Task.id == payment.referencia).first()
-        if task:
-            task.destacada = True
-            task.destacada_hasta = datetime.utcnow() + timedelta(days=TAREA_DESTACADA_DIAS)
+        task = db.query(Task).filter(Task.id == payment.referencia).with_for_update().first()
+        if not task:
+            raise HTTPException(status_code=409, detail="La tarea asociada al pago ya no existe")
+        task.destacada = True
+        task.destacada_hasta = now + timedelta(days=TAREA_DESTACADA_DIAS)
 
     elif payment.tipo == PaymentType.ANUNCIO:
-        detalle = json.loads(payment.notas) if payment.notas else {}
+        try:
+            detalle = json.loads(payment.notas) if payment.notas else {}
+        except (TypeError, json.JSONDecodeError):
+            raise HTTPException(status_code=409, detail="Los datos del anuncio asociado al pago no son válidos")
         dias = detalle.get("dias", 7)
-        ad = Ad(
+        if not isinstance(dias, int) or not 1 <= dias <= 90:
+            raise HTTPException(status_code=409, detail="La duración del anuncio asociado al pago no es válida")
+        db.add(Ad(
             marca=detalle.get("marca", "—"),
             texto=detalle.get("texto", ""),
             url_destino=detalle.get("url_destino"),
             contacto=detalle.get("contacto"),
             categoria_id=detalle.get("categoria_id"),
             activo=True,
-            fecha_inicio=datetime.utcnow(),
-            fecha_fin=datetime.utcnow() + timedelta(days=dias),
+            fecha_inicio=now,
+            fecha_fin=now + timedelta(days=dias),
             payment_id=payment.id,
-        )
-        db.add(ad)
+        ))
 
     db.commit()
     db.refresh(payment)
@@ -223,12 +197,8 @@ def confirm_payment(
 
 
 @router.post("/{payment_id}/reject", response_model=PaymentResponse)
-def reject_payment(
-    payment_id: str,
-    db: Session = Depends(get_db),
-    _admin: User = Depends(get_current_admin),
-):
-    payment = db.query(Payment).filter(Payment.id == payment_id).first()
+def reject_payment(payment_id: str, db: Session = Depends(get_db), _admin: User = Depends(get_current_admin)):
+    payment = db.query(Payment).filter(Payment.id == payment_id).with_for_update().first()
     if not payment:
         raise HTTPException(status_code=404, detail="Pago no encontrado")
     if payment.estado != PaymentStatus.PENDIENTE:
