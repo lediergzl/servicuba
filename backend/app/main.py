@@ -22,26 +22,18 @@ app = FastAPI(title="Servicios Locales API", version="1.0.0")
 app.add_middleware(GZipMiddleware, minimum_size=1000)
 app.add_middleware(
     CORSMiddleware,
-    # ServiCuba se sirve desde el mismo servicio Render. Mantener CORS
-    # abierto a cualquier origen no aporta nada al flujo normal y amplía
-    # innecesariamente la superficie de la API.
     allow_origins=["https://servicuba.onrender.com"],
     allow_credentials=False,
     allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     allow_headers=["Authorization", "Content-Type"],
 )
 
-# PostGIS debe existir ANTES de crear las tablas, porque los modelos
-# usan columnas Geometry (users.ubicacion, tasks.ubicacion).
 with engine.connect() as conn:
     conn.execute(text("CREATE EXTENSION IF NOT EXISTS postgis"))
     conn.commit()
 
 Base.metadata.create_all(bind=engine)
 
-# create_all() sólo crea tablas que no existen — no altera tablas ya
-# desplegadas. Las siguientes migraciones idempotentes mantienen bases
-# existentes compatibles con el modelo actual.
 with engine.connect() as conn:
     conn.execute(text("ALTER TABLE users ALTER COLUMN rol DROP NOT NULL"))
     conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS codigo_verificacion VARCHAR(10)"))
@@ -79,11 +71,8 @@ with engine.connect() as conn:
         "ON tasks (estado, categoria_id)"
     ))
 
-    # Backfill de integridad para bases existentes. Si una versión anterior
-    # permitió duplicados, conserva la solicitud más reciente por pareja
-    # (task, user) antes de crear el índice único. Así el deploy no falla
-    # por datos históricos y el constraint queda garantizado a partir de
-    # este punto.
+    # Remove only exact duplicate applications, retaining the newest one.
+    # This makes the subsequent unique index safe on existing databases.
     conn.execute(text("""
         DELETE FROM applications a
         USING applications b
@@ -106,6 +95,31 @@ with engine.connect() as conn:
     conn.execute(text(
         "CREATE INDEX IF NOT EXISTS idx_applications_worker_created "
         "ON applications (worker_id, created_at)"
+    ))
+
+    # A task can be reviewed only once. As with applications, clean up
+    # historical exact duplicates before enforcing the rule.
+    conn.execute(text("""
+        DELETE FROM reviews a
+        USING reviews b
+        WHERE a.task_id = b.task_id
+          AND a.id <> b.id
+          AND (
+              a.created_at < b.created_at
+              OR (a.created_at = b.created_at AND a.id::text < b.id::text)
+          )
+    """))
+    conn.execute(text(
+        "CREATE UNIQUE INDEX IF NOT EXISTS uq_reviews_task "
+        "ON reviews (task_id)"
+    ))
+    conn.execute(text(
+        "CREATE INDEX IF NOT EXISTS idx_reviews_worker "
+        "ON reviews (trabajador_id)"
+    ))
+    conn.execute(text(
+        "CREATE INDEX IF NOT EXISTS idx_reviews_client "
+        "ON reviews (cliente_id)"
     ))
     conn.commit()
 
@@ -153,7 +167,16 @@ app.include_router(ads.router, prefix="/api/ads", tags=["Ads"])
 
 @app.get("/api/health")
 def health():
-    return {"message": "Plataforma de Servicios Locales - API"}
+    # Health must reflect database availability; a process with a dead DB
+    # connection is not healthy enough for Render to route traffic to it.
+    try:
+        with engine.connect() as conn:
+            conn.execute(text("SELECT 1"))
+        return {"status": "ok", "database": "ok"}
+    except Exception:
+        logger.exception("Health check: database unavailable")
+        from fastapi import HTTPException
+        raise HTTPException(status_code=503, detail="Servicio temporalmente no disponible")
 
 NOTIFICACIONES_INTERVALO_SEGUNDOS = 60
 
