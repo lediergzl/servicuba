@@ -6,12 +6,22 @@ on:
   pull_request:
     branches: [main]
 
+permissions:
+  contents: read
+
 jobs:
   test:
     runs-on: ubuntu-latest
     defaults:
       run:
         working-directory: backend
+    env:
+      DATABASE_URL: sqlite:///./ci-test.db
+      SECRET_KEY: ci-test-secret-key-not-for-production
+      ALGORITHM: HS256
+      ACCESS_TOKEN_EXPIRE_MINUTES: 30
+      REFRESH_TOKEN_EXPIRE_DAYS: 7
+      VAPID_CLAIM_EMAIL: mailto:test@example.invalid
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -28,5 +38,5 @@ jobs:
           pip install pytest
       - name: Compile Python sources
         run: python -m compileall -q app tests
-      - name: Run smoke tests
+      - name: Run tests
         run: pytest -q tests
