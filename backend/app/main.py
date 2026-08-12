@@ -6,7 +6,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.staticfiles import StaticFiles
-from .routers import auth, users, categories, tasks, applications, reviews, chat, push, verification, payments, ads, password_reset
+from .routers import auth, users, categories, tasks, applications, reviews, chat, push, verification, payments, ads, password_reset, task_lifecycle
 from .database import engine, Base, SessionLocal
 from .models.category import Category
 from .models.user import User, UserRole
@@ -62,6 +62,10 @@ with engine.connect() as conn:
     conn.execute(text("ALTER TABLE tasks ADD COLUMN IF NOT EXISTS tipo VARCHAR(20) NOT NULL DEFAULT 'necesidad'"))
     conn.execute(text("ALTER TABLE ads ADD COLUMN IF NOT EXISTS contacto VARCHAR(50)"))
 
+    # Existing PostgreSQL enum values are preserved. Add the new terminal
+    # business state idempotently before SQLAlchemy starts serving requests.
+    conn.execute(text("ALTER TYPE taskstatus ADD VALUE IF NOT EXISTS 'CONFIRMADA'"))
+
     conn.execute(text(
         "CREATE INDEX IF NOT EXISTS idx_tasks_ubicacion_geog "
         "ON tasks USING GIST ((ubicacion::geography))"
@@ -71,8 +75,6 @@ with engine.connect() as conn:
         "ON tasks (estado, categoria_id)"
     ))
 
-    # Remove only exact duplicate applications, retaining the newest one.
-    # This makes the subsequent unique index safe on existing databases.
     conn.execute(text("""
         DELETE FROM applications a
         USING applications b
@@ -97,8 +99,6 @@ with engine.connect() as conn:
         "ON applications (worker_id, created_at)"
     ))
 
-    # A task can be reviewed only once. As with applications, clean up
-    # historical exact duplicates before enforcing the rule.
     conn.execute(text("""
         DELETE FROM reviews a
         USING reviews b
@@ -157,6 +157,7 @@ app.include_router(password_reset.router, prefix="/api/auth", tags=["Auth"])
 app.include_router(users.router, prefix="/api/users", tags=["Users"])
 app.include_router(categories.router, prefix="/api/categories", tags=["Categories"])
 app.include_router(tasks.router, prefix="/api/tasks", tags=["Tasks"])
+app.include_router(task_lifecycle.router, prefix="/api/tasks", tags=["Task lifecycle"])
 app.include_router(applications.router, prefix="/api/applications", tags=["Applications"])
 app.include_router(reviews.router, prefix="/api/reviews", tags=["Reviews"])
 app.include_router(chat.router, prefix="/api/chat", tags=["Chat"])
@@ -167,8 +168,6 @@ app.include_router(ads.router, prefix="/api/ads", tags=["Ads"])
 
 @app.get("/api/health")
 def health():
-    # Health must reflect database availability; a process with a dead DB
-    # connection is not healthy enough for Render to route traffic to it.
     try:
         with engine.connect() as conn:
             conn.execute(text("SELECT 1"))
