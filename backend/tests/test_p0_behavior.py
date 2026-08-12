@@ -6,6 +6,7 @@ import pytest
 from fastapi import HTTPException
 
 from app.models.payment import PaymentStatus
+from app.services import auth
 from app.services.auth import get_current_admin, get_current_user
 from app.routers import payments
 
@@ -25,13 +26,13 @@ class FakeQuery:
 
 
 class FakeDB:
-    def __init__(self, payment=None):
-        self.payment = payment
+    def __init__(self, value=None):
+        self.value = value
         self.audit = []
         self.commits = 0
 
     def query(self, model):
-        return FakeQuery(self.payment)
+        return FakeQuery(self.value)
 
     def add(self, value):
         self.audit.append(value)
@@ -46,13 +47,20 @@ class FakeDB:
         pass
 
 
-def test_suspended_user_is_rejected_by_auth():
-    db = FakeDB()
+def test_suspended_user_is_rejected_by_auth(monkeypatch):
     user = SimpleNamespace(id="u1", suspendido=True)
-    db.payment = user
+    db = FakeDB(user)
+    monkeypatch.setattr(auth, "decode_token", lambda token: {"sub": "u1"})
 
     with pytest.raises(HTTPException) as exc:
-        get_current_user.__wrapped__(token="unused", db=db)
+        get_current_user(token="unused", db=db)
+    assert exc.value.status_code == 403
+
+
+def test_invalid_token_is_rejected_by_auth(monkeypatch):
+    monkeypatch.setattr(auth, "decode_token", lambda token: None)
+    with pytest.raises(HTTPException) as exc:
+        get_current_user(token="invalid", db=FakeDB())
     assert exc.value.status_code == 401
 
 
