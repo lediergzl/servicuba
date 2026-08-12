@@ -1,4 +1,4 @@
-import random
+import secrets
 from datetime import datetime, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -8,6 +8,7 @@ from ..database import get_db
 from ..models.user import User
 from ..schemas.verification import VerificationConfirm
 from ..services.auth import get_current_user
+from ..utils.security import get_password_hash, verify_password
 
 router = APIRouter()
 
@@ -22,19 +23,18 @@ def send_verification_code(
     if current_user.verificado:
         raise HTTPException(status_code=400, detail="Tu cuenta ya está verificada")
 
-    codigo = f"{random.randint(0, 999999):06d}"
-    current_user.codigo_verificacion = codigo
+    # OTP generado con CSPRNG y almacenado únicamente como hash. El código
+    # jamás se devuelve por API: en producción debe entregarlo el proveedor
+    # SMS/WhatsApp conectado a este punto.
+    codigo = f"{secrets.randbelow(1_000_000):06d}"
+    current_user.codigo_verificacion = get_password_hash(codigo)
     current_user.codigo_verificacion_expira = datetime.utcnow() + timedelta(minutes=CODE_TTL_MINUTES)
     db.commit()
 
-    # NOTA: no hay pasarela de SMS/WhatsApp conectada todavía. En producción,
-    # este es el punto donde se llamaría a un proveedor real (ej. Twilio,
-    # una pasarela local cubana, etc.) pasándole `current_user.telefono` y
-    # `codigo`. Mientras tanto, se devuelve el código en la respuesta para
-    # poder probar el flujo de verificación de punta a punta.
+    # No revelar el OTP ni si existe un canal de entrega. El proveedor de
+    # mensajería debe consumir `codigo` antes de que termine esta operación.
     return {
-        "message": "Código de verificación generado",
-        "codigo_demo": codigo,
+        "message": "Código de verificación enviado",
         "expira_en_minutos": CODE_TTL_MINUTES,
     }
 
@@ -51,7 +51,7 @@ def confirm_verification_code(
         raise HTTPException(status_code=400, detail="No hay ningún código pendiente, solicita uno nuevo")
     if datetime.utcnow() > current_user.codigo_verificacion_expira:
         raise HTTPException(status_code=400, detail="El código expiró, solicita uno nuevo")
-    if body.codigo != current_user.codigo_verificacion:
+    if not verify_password(body.codigo, current_user.codigo_verificacion):
         raise HTTPException(status_code=400, detail="Código incorrecto")
 
     current_user.verificado = True
