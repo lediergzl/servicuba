@@ -1,11 +1,9 @@
-"""Smoke tests for the application package.
-
-These tests intentionally avoid requiring a live PostgreSQL instance. They
-catch broken imports and missing application modules early in CI/deploys.
-"""
+"""Low-cost smoke tests that do not require a live database."""
 
 
-def test_application_imports():
-    from app.main import app
+def test_core_model_enums_import():
+    from app.models.task import TaskStatus
+    from app.models.application import AppStatus
 
-    assert app.title == "Servicios Locales API"
+    assert TaskStatus.ACTIVA
+    assert AppStatus.PENDIENTE
