@@ -11,14 +11,15 @@ from ..services.auth import get_current_user
 
 router = APIRouter()
 
+
 @router.post("", response_model=ReviewResponse)
 def create_review(
     review: ReviewCreate,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    # Lock the task so two concurrent review requests cannot both pass the
-    # existence check before either inserts the review.
+    # A review belongs to a closed, confirmed contract. Lock the task so two
+    # concurrent review requests cannot both pass the uniqueness check.
     task = (
         db.query(Task)
         .filter(Task.id == review.task_id)
@@ -27,13 +28,11 @@ def create_review(
     )
     if not task:
         raise HTTPException(status_code=404, detail="Tarea no encontrada")
-    if task.cliente_id != current_user.id:
+    if task.cliente_id != current_user.id and task.tipo != "oferta":
         raise HTTPException(status_code=403, detail="No eres el cliente de esta tarea")
-    if task.estado != TaskStatus.COMPLETADA:
-        raise HTTPException(status_code=400, detail="La tarea aún no ha sido completada")
+    if task.estado != TaskStatus.CONFIRMADA:
+        raise HTTPException(status_code=400, detail="El servicio debe estar confirmado antes de calificarlo")
 
-    # Never trust trabajador_id supplied by the client. It must be the
-    # worker whose application was actually accepted for this task.
     accepted = (
         db.query(Application)
         .filter(
@@ -44,7 +43,15 @@ def create_review(
     )
     if not accepted:
         raise HTTPException(status_code=400, detail="La tarea no tiene un trabajador asignado")
-    if accepted.worker_id != review.trabajador_id:
+
+    # For a normal need, the accepted applicant is the worker. For an offer,
+    # the publisher is the worker and the accepted applicant is the client.
+    expected_worker_id = accepted.worker_id if task.tipo != "oferta" else task.cliente_id
+    expected_client_id = task.cliente_id if task.tipo != "oferta" else accepted.worker_id
+
+    if expected_client_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Sólo el cliente puede calificar al trabajador")
+    if review.trabajador_id != expected_worker_id:
         raise HTTPException(status_code=400, detail="El trabajador indicado no corresponde a esta tarea")
 
     existing = db.query(Review).filter(Review.task_id == review.task_id).first()
@@ -53,22 +60,22 @@ def create_review(
 
     db_review = Review(
         task_id=review.task_id,
-        cliente_id=current_user.id,
-        trabajador_id=accepted.worker_id,
+        cliente_id=expected_client_id,
+        trabajador_id=expected_worker_id,
         rating=review.rating,
         comentario=review.comentario
     )
     db.add(db_review)
     db.flush()
 
-    worker = db.query(User).filter(User.id == accepted.worker_id).first()
+    worker = db.query(User).filter(User.id == expected_worker_id).first()
     if worker:
         avg_rating = (
             db.query(func.avg(Review.rating))
             .filter(Review.trabajador_id == worker.id)
             .scalar()
         )
-        worker.rating = avg_rating or 0.0
+        worker.rating = float(avg_rating or 0.0)
 
     db.commit()
     db.refresh(db_review)
