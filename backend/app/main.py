@@ -100,7 +100,6 @@ with engine.connect() as conn:
     conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS foto VARCHAR(255)"))
     conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS rating DOUBLE PRECISION DEFAULT 0.0"))
     conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS verificado BOOLEAN DEFAULT false"))
-    # Recovery codes are bcrypt hashes (~60 chars), never plaintext codes.
     conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS codigo_reset_password VARCHAR(255)"))
     conn.execute(text("ALTER TABLE users ALTER COLUMN codigo_reset_password TYPE VARCHAR(255)"))
     conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS codigo_reset_password_expira TIMESTAMP"))
@@ -128,6 +127,20 @@ with engine.connect() as conn:
     conn.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS uq_reviews_task ON reviews (task_id)"))
     conn.execute(text("CREATE INDEX IF NOT EXISTS idx_reviews_worker ON reviews (trabajador_id)"))
     conn.execute(text("CREATE INDEX IF NOT EXISTS idx_reviews_client ON reviews (cliente_id)"))
+    # Payment idempotency guards. They are database-level protections, not
+    # merely application checks, so concurrent requests cannot create two
+    # pending intents for the same logical benefit.
+    conn.execute(text("""
+        CREATE UNIQUE INDEX IF NOT EXISTS uq_pending_subscription_user
+        ON payments (user_id, tipo)
+        WHERE estado = 'PENDIENTE' AND tipo = 'SUSCRIPCION_TRABAJADOR'
+    """))
+    conn.execute(text("""
+        CREATE UNIQUE INDEX IF NOT EXISTS uq_pending_feature_task
+        ON payments (user_id, tipo, referencia)
+        WHERE estado = 'PENDIENTE' AND tipo = 'TAREA_DESTACADA'
+    """))
+    conn.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS uq_ad_payment ON ads (payment_id) WHERE payment_id IS NOT NULL"))
     conn.commit()
 
 _DEFAULT_CATEGORIES = [(1, "Electricista", "⚡"), (2, "Plomero", "🔧"), (3, "Reparador", "🛠"), (4, "Albañil", "🧱")]
