@@ -5,7 +5,7 @@ from types import SimpleNamespace
 import pytest
 from fastapi import HTTPException
 
-from app.models.payment import PaymentStatus
+from app.models.payment import PaymentStatus, PaymentType
 from app.services import auth
 from app.services.auth import get_current_admin, get_current_user
 from app.routers import payments
@@ -79,6 +79,7 @@ def test_admin_guard_accepts_admin():
 def test_refund_is_idempotent_and_terminal(monkeypatch):
     payment = SimpleNamespace(
         id="p1",
+        tipo=PaymentType.ANUNCIO,
         estado=PaymentStatus.CONFIRMADO,
         notas="original",
         confirmed_at=None,
@@ -102,7 +103,8 @@ def test_refund_is_idempotent_and_terminal(monkeypatch):
 
 def test_reject_is_only_allowed_from_pending(monkeypatch):
     payment = SimpleNamespace(
-        id="p2", estado=PaymentStatus.PENDIENTE, confirmed_at=None
+        id="p2", tipo=PaymentType.ANUNCIO,
+        estado=PaymentStatus.PENDIENTE, confirmed_at=None
     )
     db = FakeDB(payment)
     admin = SimpleNamespace(id="admin")
