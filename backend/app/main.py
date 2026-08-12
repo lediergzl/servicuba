@@ -1,11 +1,14 @@
 import asyncio
 import logging
+import time
+from collections import defaultdict, deque
 from pathlib import Path
 from sqlalchemy import text
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.staticfiles import StaticFiles
+from fastapi.responses import JSONResponse
 from .routers import auth, users, categories, tasks, applications, reviews, chat, push, verification, payments, ads, password_reset, task_lifecycle
 from .database import engine, Base, SessionLocal
 from .models.category import Category
@@ -27,6 +30,48 @@ app.add_middleware(
     allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     allow_headers=["Authorization", "Content-Type"],
 )
+
+# Lightweight abuse protection for the single-instance deployment. It is
+# intentionally limited to sensitive endpoints; public reads are not
+# throttled. Render terminates the TLS/proxy layer before this middleware.
+_RATE_WINDOWS = {
+    "/api/auth/login": (10, 60),
+    "/api/auth/register": (5, 300),
+    "/api/auth/forgot-password": (3, 600),
+    "/api/auth/reset-password": (5, 600),
+    "/api/applications": (30, 60),
+}
+_rate_events = defaultdict(deque)
+
+
+def _client_key(request: Request) -> str:
+    forwarded = request.headers.get("x-forwarded-for")
+    if forwarded:
+        return forwarded.split(",")[0].strip()
+    return request.client.host if request.client else "unknown"
+
+
+@app.middleware("http")
+async def sensitive_endpoint_rate_limit(request: Request, call_next):
+    if request.method in {"POST", "PUT", "PATCH", "DELETE"}:
+        path = request.url.path
+        matched = next((p for p in _RATE_WINDOWS if path == p or path.startswith(p + "/")), None)
+        if matched:
+            limit, window = _RATE_WINDOWS[matched]
+            now = time.monotonic()
+            key = f"{_client_key(request)}:{matched}"
+            events = _rate_events[key]
+            while events and now - events[0] >= window:
+                events.popleft()
+            if len(events) >= limit:
+                return JSONResponse(
+                    status_code=429,
+                    content={"detail": "Demasiadas solicitudes. Intenta nuevamente más tarde."},
+                    headers={"Retry-After": str(max(1, int(window - (now - events[0]))))},
+                )
+            events.append(now)
+    return await call_next(request)
+
 
 with engine.connect() as conn:
     conn.execute(text("CREATE EXTENSION IF NOT EXISTS postgis"))
@@ -55,7 +100,9 @@ with engine.connect() as conn:
     conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS foto VARCHAR(255)"))
     conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS rating DOUBLE PRECISION DEFAULT 0.0"))
     conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS verificado BOOLEAN DEFAULT false"))
-    conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS codigo_reset_password VARCHAR(10)"))
+    # Recovery codes are bcrypt hashes (~60 chars), never plaintext codes.
+    conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS codigo_reset_password VARCHAR(255)"))
+    conn.execute(text("ALTER TABLE users ALTER COLUMN codigo_reset_password TYPE VARCHAR(255)"))
     conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS codigo_reset_password_expira TIMESTAMP"))
     conn.execute(text("ALTER TABLE tasks ADD COLUMN IF NOT EXISTS destacada BOOLEAN NOT NULL DEFAULT false"))
     conn.execute(text("ALTER TABLE tasks ADD COLUMN IF NOT EXISTS destacada_hasta TIMESTAMP"))
@@ -104,8 +151,6 @@ app.include_router(auth.router, prefix="/api/auth", tags=["Auth"])
 app.include_router(password_reset.router, prefix="/api/auth", tags=["Auth"])
 app.include_router(users.router, prefix="/api/users", tags=["Users"])
 app.include_router(categories.router, prefix="/api/categories", tags=["Categories"])
-# Register lifecycle routes before the legacy generic task routes so
-# /{task_id}/complete resolves to the guarded workflow endpoint.
 app.include_router(task_lifecycle.router, prefix="/api/tasks", tags=["Task lifecycle"])
 app.include_router(tasks.router, prefix="/api/tasks", tags=["Tasks"])
 app.include_router(applications.router, prefix="/api/applications", tags=["Applications"])
