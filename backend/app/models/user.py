@@ -7,15 +7,7 @@ import uuid
 import enum
 
 class UserRole(enum.Enum):
-    """DEPRECADO — se mantiene sólo porque la columna `rol` ya existe en
-    bases de datos desplegadas y SQLAlchemy necesita el tipo Enum para
-    poder seguir mapeando esa columna sin romper el arranque. Ningún
-    endpoint nuevo lee ni escribe `rol`: la app ahora usa
-    `es_cliente`/`es_trabajador` (columnas booleanas independientes) para
-    que un mismo usuario pueda tener ambos perfiles a la vez, en vez de
-    un rol fijo elegido al registrarse. Ver la migración en main.py que
-    relaja el NOT NULL de esta columna y hace el backfill de las cuentas
-    existentes hacia el nuevo esquema."""
+    """Deprecated legacy role kept only for the existing database column."""
     CLIENTE = "cliente"
     TRABAJADOR = "trabajador"
 
@@ -30,28 +22,12 @@ class User(Base):
     nombre = Column(String(100), nullable=False)
     telefono = Column(String(20), unique=True, nullable=False)
     password_hash = Column(String(255), nullable=False)
-
-    # DEPRECADO — ver nota en UserRole más arriba. Nullable a propósito:
-    # ya no se asigna en el registro ni se lee en ningún router.
     rol = Column(Enum(UserRole), nullable=True)
 
-    # ---------- Dualidad de roles ----------
-    # Un mismo usuario puede publicar tareas (cliente) y/o ofrecer sus
-    # servicios (trabajador) al mismo tiempo, sin registrarse dos veces.
-    # es_cliente empieza en True para todos (publicar una tarea nunca
-    # requirió "activar" nada); es_trabajador empieza en False y se
-    # activa cuando el usuario completa su perfil de oficio (ver
-    # PUT /users/activar-trabajador).
     es_cliente = Column(Boolean, default=True, nullable=False)
     es_trabajador = Column(Boolean, default=False, nullable=False)
-
-    # Qué panel ve el usuario al entrar. Se persiste en el SERVIDOR (no
-    # sólo en localStorage) para que la app "recuerde" el último modo
-    # elegido aunque entre desde otro dispositivo o borre datos del
-    # navegador — ver PUT /users/modo-activo.
     modo_activo = Column(String(20), default="cliente", nullable=False)
 
-    # ---------- Perfil de trabajador (sólo aplica si es_trabajador=True) ----------
     categoria_id = Column(Integer, ForeignKey("categories.id"), nullable=True)
     descripcion_trabajador = Column(Text, nullable=True)
     precio_hora = Column(Float, nullable=True)
@@ -67,14 +43,10 @@ class User(Base):
     codigo_verificacion = Column(String(10), nullable=True)
     codigo_verificacion_expira = Column(DateTime, nullable=True)
 
-    # ---------- Recuperación de contraseña ----------
-    # Mismo patrón que codigo_verificacion/codigo_verificacion_expira de
-    # arriba (código de un solo uso con TTL) — ver routers/password_reset.py.
-    # No hay pasarela SMS conectada todavía (igual que verification.py),
-    # así que el endpoint devuelve el código en la respuesta sólo para
-    # poder probar el flujo de punta a punta mientras no exista un
-    # proveedor real.
-    codigo_reset_password = Column(String(10), nullable=True)
+    # Password recovery stores a bcrypt hash, not the six-digit code.
+    # bcrypt hashes are ~60 characters, so the DB field must not be limited
+    # to the old VARCHAR(10) used for plaintext demo codes.
+    codigo_reset_password = Column(String(255), nullable=True)
     codigo_reset_password_expira = Column(DateTime, nullable=True)
 
     plan = Column(Enum(UserPlan), default=UserPlan.GRATIS, nullable=False)
