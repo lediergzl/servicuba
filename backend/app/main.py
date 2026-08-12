@@ -31,9 +31,6 @@ app.add_middleware(
     allow_headers=["Authorization", "Content-Type"],
 )
 
-# Lightweight abuse protection for the single-instance deployment. It is
-# intentionally limited to sensitive endpoints; public reads are not
-# throttled. Render terminates the TLS/proxy layer before this middleware.
 _RATE_WINDOWS = {
     "/api/auth/login": (10, 60),
     "/api/auth/register": (5, 300),
@@ -64,11 +61,7 @@ async def sensitive_endpoint_rate_limit(request: Request, call_next):
             while events and now - events[0] >= window:
                 events.popleft()
             if len(events) >= limit:
-                return JSONResponse(
-                    status_code=429,
-                    content={"detail": "Demasiadas solicitudes. Intenta nuevamente más tarde."},
-                    headers={"Retry-After": str(max(1, int(window - (now - events[0]))))},
-                )
+                return JSONResponse(status_code=429, content={"detail": "Demasiadas solicitudes. Intenta nuevamente más tarde."}, headers={"Retry-After": str(max(1, int(window - (now - events[0]))))})
             events.append(now)
     return await call_next(request)
 
@@ -81,6 +74,8 @@ Base.metadata.create_all(bind=engine)
 
 with engine.connect() as conn:
     conn.execute(text("ALTER TABLE users ALTER COLUMN rol DROP NOT NULL"))
+    conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS suspendido BOOLEAN NOT NULL DEFAULT false"))
+    conn.execute(text("CREATE INDEX IF NOT EXISTS idx_users_suspendido ON users (suspendido)"))
     conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS codigo_verificacion VARCHAR(10)"))
     conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS codigo_verificacion_expira TIMESTAMP"))
     conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS plan VARCHAR(20) NOT NULL DEFAULT 'GRATIS'"))
@@ -127,20 +122,6 @@ with engine.connect() as conn:
     conn.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS uq_reviews_task ON reviews (task_id)"))
     conn.execute(text("CREATE INDEX IF NOT EXISTS idx_reviews_worker ON reviews (trabajador_id)"))
     conn.execute(text("CREATE INDEX IF NOT EXISTS idx_reviews_client ON reviews (cliente_id)"))
-    # Payment idempotency guards. They are database-level protections, not
-    # merely application checks, so concurrent requests cannot create two
-    # pending intents for the same logical benefit.
-    conn.execute(text("""
-        CREATE UNIQUE INDEX IF NOT EXISTS uq_pending_subscription_user
-        ON payments (user_id, tipo)
-        WHERE estado = 'PENDIENTE' AND tipo = 'SUSCRIPCION_TRABAJADOR'
-    """))
-    conn.execute(text("""
-        CREATE UNIQUE INDEX IF NOT EXISTS uq_pending_feature_task
-        ON payments (user_id, tipo, referencia)
-        WHERE estado = 'PENDIENTE' AND tipo = 'TAREA_DESTACADA'
-    """))
-    conn.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS uq_ad_payment ON ads (payment_id) WHERE payment_id IS NOT NULL"))
     conn.commit()
 
 _DEFAULT_CATEGORIES = [(1, "Electricista", "⚡"), (2, "Plomero", "🔧"), (3, "Reparador", "🛠"), (4, "Albañil", "🧱")]
