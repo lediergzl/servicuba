@@ -27,6 +27,7 @@ class User(Base):
     es_cliente = Column(Boolean, default=True, nullable=False)
     es_trabajador = Column(Boolean, default=False, nullable=False)
     modo_activo = Column(String(20), default="cliente", nullable=False)
+    suspendido = Column(Boolean, default=False, nullable=False, index=True)
 
     categoria_id = Column(Integer, ForeignKey("categories.id"), nullable=True)
     descripcion_trabajador = Column(Text, nullable=True)
@@ -44,8 +45,6 @@ class User(Base):
     codigo_verificacion_expira = Column(DateTime, nullable=True)
 
     # Password recovery stores a bcrypt hash, not the six-digit code.
-    # bcrypt hashes are ~60 characters, so the DB field must not be limited
-    # to the old VARCHAR(10) used for plaintext demo codes.
     codigo_reset_password = Column(String(255), nullable=True)
     codigo_reset_password_expira = Column(DateTime, nullable=True)
 
