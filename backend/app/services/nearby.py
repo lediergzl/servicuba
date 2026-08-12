@@ -11,6 +11,7 @@ from geoalchemy2 import Geography
 from geoalchemy2.functions import ST_DWithin, ST_Distance, ST_SetSRID, ST_MakePoint, ST_X, ST_Y
 from ..models.task import Task, TaskStatus
 from ..models.user import User, UserPlan
+from .disponibilidad import calcular_disponibles_ahora
 
 
 def find_nearby(
@@ -70,9 +71,27 @@ def find_nearby(
     boost_activo = destacada_pagada | publicador_premium
     results = query.order_by(boost_activo.desc(), "distance").limit(limit).all()
 
+    # "Disponible ahora" (calendario de disponibilidad, beneficio
+    # Premium — ver services/disponibilidad.py) sólo tiene sentido para
+    # OFERTAS: ahí el publicador (Task.cliente_id) es el trabajador. Para
+    # necesidades el publicador es el cliente, que no tiene calendario.
+    # Se calcula en UN solo lote para todos los resultados, no por fila.
+    disponibles_ahora = set()
+    if tipo == "oferta":
+        worker_ids = {task.cliente_id for task, *_ in results}
+        disponibles_ahora = calcular_disponibles_ahora(db, worker_ids)
+
+        # Dashboard Pro (ver services/analytics.py): cada vez que una
+        # oferta aparece en un listado de "cercanas" cuenta como una
+        # impresión. Se hace en lote sobre los objetos Task ya cargados
+        # por la query de arriba, en vez de una UPDATE aparte por fila.
+        for task, *_ in results:
+            task.impresiones = (task.impresiones or 0) + 1
+        db.commit()
+
     items = []
     for task, dist, task_lat, task_lng, premium in results:
-        items.append({
+        item = {
             "id": task.id,
             "titulo": task.titulo,
             "descripcion": task.descripcion,
@@ -91,5 +110,8 @@ def find_nearby(
             "created_at": task.created_at,
             "lat": task_lat,
             "lng": task_lng,
-        })
+        }
+        if tipo == "oferta":
+            item["disponible_ahora"] = task.cliente_id in disponibles_ahora
+        items.append(item)
     return items
