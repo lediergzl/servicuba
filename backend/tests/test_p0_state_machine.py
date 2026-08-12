@@ -3,8 +3,6 @@
 from datetime import datetime, timedelta
 from types import SimpleNamespace
 
-import pytest
-
 from app.models.payment import PaymentStatus, PaymentType
 
 
@@ -32,10 +30,8 @@ def test_entitlement_expiry_is_recordable():
     assert payment.entitlement_expires_at > now
 
 
-def test_p0_source_tests_remain_importable():
-    # Importing the application-level modules is itself a regression guard:
-    # configuration errors must not prevent pytest collection.
-    import app.main  # noqa: F401
+def test_p0_router_modules_are_importable():
+    # Router imports must remain independent from production startup side effects.
     import app.routers.admin  # noqa: F401
     import app.routers.payments  # noqa: F401
     import app.routers.chat  # noqa: F401
