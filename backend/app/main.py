@@ -60,75 +60,30 @@ with engine.connect() as conn:
     conn.execute(text("ALTER TABLE tasks ADD COLUMN IF NOT EXISTS destacada BOOLEAN NOT NULL DEFAULT false"))
     conn.execute(text("ALTER TABLE tasks ADD COLUMN IF NOT EXISTS destacada_hasta TIMESTAMP"))
     conn.execute(text("ALTER TABLE tasks ADD COLUMN IF NOT EXISTS tipo VARCHAR(20) NOT NULL DEFAULT 'necesidad'"))
-    conn.execute(text("ALTER TABLE ads ADD COLUMN IF NOT EXISTS contacto VARCHAR(50)"))
-
-    # Existing PostgreSQL enum values are preserved. Add the new terminal
-    # business state idempotently before SQLAlchemy starts serving requests.
     conn.execute(text("ALTER TYPE taskstatus ADD VALUE IF NOT EXISTS 'CONFIRMADA'"))
-
-    conn.execute(text(
-        "CREATE INDEX IF NOT EXISTS idx_tasks_ubicacion_geog "
-        "ON tasks USING GIST ((ubicacion::geography))"
-    ))
-    conn.execute(text(
-        "CREATE INDEX IF NOT EXISTS idx_tasks_estado_categoria "
-        "ON tasks (estado, categoria_id)"
-    ))
-
+    conn.execute(text("CREATE INDEX IF NOT EXISTS idx_tasks_ubicacion_geog ON tasks USING GIST ((ubicacion::geography))"))
+    conn.execute(text("CREATE INDEX IF NOT EXISTS idx_tasks_estado_categoria ON tasks (estado, categoria_id)"))
     conn.execute(text("""
         DELETE FROM applications a
         USING applications b
-        WHERE a.task_id = b.task_id
-          AND a.worker_id = b.worker_id
-          AND a.id <> b.id
-          AND (
-              a.created_at < b.created_at
-              OR (a.created_at = b.created_at AND a.id::text < b.id::text)
-          )
+        WHERE a.task_id = b.task_id AND a.worker_id = b.worker_id AND a.id <> b.id
+          AND (a.created_at < b.created_at OR (a.created_at = b.created_at AND a.id::text < b.id::text))
     """))
-    conn.execute(text(
-        "CREATE UNIQUE INDEX IF NOT EXISTS uq_applications_task_worker "
-        "ON applications (task_id, worker_id)"
-    ))
-    conn.execute(text(
-        "CREATE INDEX IF NOT EXISTS idx_applications_task_status "
-        "ON applications (task_id, estado)"
-    ))
-    conn.execute(text(
-        "CREATE INDEX IF NOT EXISTS idx_applications_worker_created "
-        "ON applications (worker_id, created_at)"
-    ))
-
+    conn.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS uq_applications_task_worker ON applications (task_id, worker_id)"))
+    conn.execute(text("CREATE INDEX IF NOT EXISTS idx_applications_task_status ON applications (task_id, estado)"))
+    conn.execute(text("CREATE INDEX IF NOT EXISTS idx_applications_worker_created ON applications (worker_id, created_at)"))
     conn.execute(text("""
         DELETE FROM reviews a
         USING reviews b
-        WHERE a.task_id = b.task_id
-          AND a.id <> b.id
-          AND (
-              a.created_at < b.created_at
-              OR (a.created_at = b.created_at AND a.id::text < b.id::text)
-          )
+        WHERE a.task_id = b.task_id AND a.id <> b.id
+          AND (a.created_at < b.created_at OR (a.created_at = b.created_at AND a.id::text < b.id::text))
     """))
-    conn.execute(text(
-        "CREATE UNIQUE INDEX IF NOT EXISTS uq_reviews_task "
-        "ON reviews (task_id)"
-    ))
-    conn.execute(text(
-        "CREATE INDEX IF NOT EXISTS idx_reviews_worker "
-        "ON reviews (trabajador_id)"
-    ))
-    conn.execute(text(
-        "CREATE INDEX IF NOT EXISTS idx_reviews_client "
-        "ON reviews (cliente_id)"
-    ))
+    conn.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS uq_reviews_task ON reviews (task_id)"))
+    conn.execute(text("CREATE INDEX IF NOT EXISTS idx_reviews_worker ON reviews (trabajador_id)"))
+    conn.execute(text("CREATE INDEX IF NOT EXISTS idx_reviews_client ON reviews (cliente_id)"))
     conn.commit()
 
-_DEFAULT_CATEGORIES = [
-    (1, "Electricista", "⚡"),
-    (2, "Plomero", "🔧"),
-    (3, "Reparador", "🛠"),
-    (4, "Albañil", "🧱"),
-]
+_DEFAULT_CATEGORIES = [(1, "Electricista", "⚡"), (2, "Plomero", "🔧"), (3, "Reparador", "🛠"), (4, "Albañil", "🧱")]
 with SessionLocal() as db:
     if db.query(Category).count() == 0:
         for cat_id, nombre, icono in _DEFAULT_CATEGORIES:
@@ -141,14 +96,7 @@ if settings.ADMIN_PHONE and settings.ADMIN_PASSWORD:
         if admin_user:
             admin_user.es_admin = True
         else:
-            admin_user = User(
-                nombre="Administrador",
-                telefono=settings.ADMIN_PHONE,
-                password_hash=get_password_hash(settings.ADMIN_PASSWORD),
-                rol=UserRole.CLIENTE,
-                verificado=True,
-                es_admin=True,
-            )
+            admin_user = User(nombre="Administrador", telefono=settings.ADMIN_PHONE, password_hash=get_password_hash(settings.ADMIN_PASSWORD), rol=UserRole.CLIENTE, verificado=True, es_admin=True)
             db.add(admin_user)
         db.commit()
 
@@ -156,8 +104,10 @@ app.include_router(auth.router, prefix="/api/auth", tags=["Auth"])
 app.include_router(password_reset.router, prefix="/api/auth", tags=["Auth"])
 app.include_router(users.router, prefix="/api/users", tags=["Users"])
 app.include_router(categories.router, prefix="/api/categories", tags=["Categories"])
-app.include_router(tasks.router, prefix="/api/tasks", tags=["Tasks"])
+# Register lifecycle routes before the legacy generic task routes so
+# /{task_id}/complete resolves to the guarded workflow endpoint.
 app.include_router(task_lifecycle.router, prefix="/api/tasks", tags=["Task lifecycle"])
+app.include_router(tasks.router, prefix="/api/tasks", tags=["Tasks"])
 app.include_router(applications.router, prefix="/api/applications", tags=["Applications"])
 app.include_router(reviews.router, prefix="/api/reviews", tags=["Reviews"])
 app.include_router(chat.router, prefix="/api/chat", tags=["Chat"])
