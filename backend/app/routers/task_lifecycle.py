@@ -48,16 +48,11 @@ def start_task(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """El participante responsable del trabajo inicia una tarea asignada."""
     task = _locked_task(db, task_id)
     app = _accepted_application(db, task_id)
-
-    # necesidad: worker accepted app starts the work.
-    # oferta: publisher (worker) is the one providing the service.
     worker_id = app.worker_id if task.tipo != "oferta" else task.cliente_id
     if worker_id != current_user.id:
         raise HTTPException(status_code=403, detail="Sólo el trabajador asignado puede iniciar el servicio")
-
     _perform_transition(db, task, LifecycleAction.START)
     db.commit()
     db.refresh(task)
@@ -70,13 +65,11 @@ def complete_task_lifecycle(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """El trabajador declara terminado el servicio; el cliente aún debe confirmar."""
     task = _locked_task(db, task_id)
     app = _accepted_application(db, task_id)
     worker_id = app.worker_id if task.tipo != "oferta" else task.cliente_id
     if worker_id != current_user.id:
         raise HTTPException(status_code=403, detail="Sólo el trabajador responsable puede finalizar el servicio")
-
     _perform_transition(db, task, LifecycleAction.COMPLETE)
     db.commit()
     db.refresh(task)
@@ -89,16 +82,11 @@ def confirm_task(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """El cliente confirma que recibió el servicio y cierra el contrato."""
     task = _locked_task(db, task_id)
     app = _accepted_application(db, task_id)
-
-    # necesidad: task owner is client.
-    # oferta: accepted applicant is client.
     client_id = task.cliente_id if task.tipo != "oferta" else app.worker_id
     if client_id != current_user.id:
         raise HTTPException(status_code=403, detail="Sólo el cliente puede confirmar el servicio")
-
     _perform_transition(db, task, LifecycleAction.CONFIRM)
     db.commit()
     db.refresh(task)
@@ -111,12 +99,16 @@ def cancel_task_lifecycle(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Cualquiera de las partes puede cancelar antes de la confirmación final."""
     task = _locked_task(db, task_id)
+
+    # COMPLETADA is terminal with respect to cancellation. Reject before
+    # querying the accepted application because no application is needed to
+    # determine that this transition is invalid.
+    if task.estado == TaskStatus.COMPLETADA:
+        raise HTTPException(status_code=409, detail="El servicio ya fue completado y no puede cancelarse")
+
     app = None
-    if task.estado in (TaskStatus.ASIGNADA, TaskStatus.EN_PROCESO, TaskStatus.COMPLETADA):
-        # A completed task is deliberately excluded below; keep this lookup
-        # only for the participant checks on cancellable assigned/in-process tasks.
+    if task.estado in (TaskStatus.ASIGNADA, TaskStatus.EN_PROCESO):
         app = _accepted_application(db, task_id)
 
     if task.estado == TaskStatus.ACTIVA:
@@ -128,9 +120,7 @@ def cancel_task_lifecycle(
         if current_user.id not in participants:
             raise HTTPException(status_code=403, detail="No formas parte de este servicio")
     else:
-        # COMPLETADA is intentionally not cancellable: it is waiting for
-        # client confirmation and must be resolved through confirm/dispute.
-        raise HTTPException(status_code=409, detail="El servicio ya fue completado y no puede cancelarse")
+        raise HTTPException(status_code=409, detail="El servicio ya no puede cancelarse")
 
     _perform_transition(db, task, LifecycleAction.CANCEL)
     db.commit()
