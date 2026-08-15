@@ -1,5 +1,4 @@
 """P0 guards for weekly application limits and premium bypass."""
-from datetime import datetime, timedelta
 from types import SimpleNamespace
 
 import pytest
@@ -33,11 +32,17 @@ class DB:
 
 
 def user(premium=False):
-    return SimpleNamespace(id="worker", es_trabajador=True, es_cliente=False, premium=premium)
+    return SimpleNamespace(
+        id="worker", es_trabajador=True, es_cliente=False,
+        premium=premium, nombre="Worker", email="worker@example.com"
+    )
 
 
 def task():
-    return SimpleNamespace(id="t1", cliente_id="client", estado=TaskStatus.ACTIVA, tipo="necesidad")
+    return SimpleNamespace(
+        id="t1", cliente_id="client", estado=TaskStatus.ACTIVA,
+        tipo="necesidad", titulo="Test task", descripcion="Test"
+    )
 
 
 def test_free_worker_at_weekly_limit_is_rejected(monkeypatch):
@@ -51,8 +56,6 @@ def test_free_worker_at_weekly_limit_is_rejected(monkeypatch):
 def test_premium_worker_bypasses_weekly_limit(monkeypatch):
     monkeypatch.setattr(applications, "PLAN_GRATIS_POSTULACIONES_SEMANA", 5)
     monkeypatch.setattr(applications, "is_premium_active", lambda _: True)
-    # The test stops at the duplicate-check boundary; reaching it proves the
-    # weekly-limit guard did not reject the premium account.
     db = DB(task(), 5)
     monkeypatch.setattr(db, "add", lambda obj: None, raising=False)
     monkeypatch.setattr(db, "commit", lambda: None, raising=False)
