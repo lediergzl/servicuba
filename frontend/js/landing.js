@@ -63,7 +63,7 @@ export async function initLandingSearch() {
 
         const matches = categoriesCache.filter(c => normalize(c.nombre).includes(q));
         if (!matches.length) {
-            resultsBox.innerHTML = '<p class="empty-state">No encontramos ese oficio todavía. ¡Regístrate y publica tu tarea igual!</p>';
+            resultsBox.innerHTML = '<p class="empty-state">No encontramos ese oficio todavía. Puedes registrarte para publicar tu necesidad.</p>';
             resultsBox.classList.remove('hidden');
             return;
         }
@@ -88,10 +88,9 @@ export async function initLandingSearch() {
                 resultsBox.classList.add('hidden');
                 input.value = '';
 
-                // No confiamos únicamente en la presencia del token: puede
-                // haber expirado mientras la landing seguía abierta. Validar
-                // la sesión aquí evita mandar a una cuenta autenticada al
-                // registro por error.
+                // The landing search is public. An authenticated user must
+                // never be sent to registration just because the landing is
+                // still visible or the token check races with bootstrap.
                 const token = localStorage.getItem('token');
                 if (token) {
                     try {
@@ -100,9 +99,8 @@ export async function initLandingSearch() {
                         showDashboardCliente();
                         return;
                     } catch {
-                        // apiFetch ya elimina el token y emite auth:expired
-                        // si la sesión realmente expiró. En ese caso sí debe
-                        // continuar hacia registro/inicio de sesión.
+                        // Only a genuinely invalid/expired session falls
+                        // through to authentication.
                     }
                 }
 
