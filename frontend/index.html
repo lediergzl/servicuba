@@ -10,8 +10,18 @@
     <link rel="apple-touch-icon" href="/assets/icons/icon-192.png">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <!-- Big Shoulders Display: sólo se usa el peso 800 en todo el CSS
+         (h1/h2/h3 lo fijan siempre en 800) — se quitó el peso 600, que
+         no se usaba en ningún selector y sólo sumaba una descarga extra
+         de fuente sin ningún beneficio visual. -->
     <link href="https://fonts.googleapis.com/css2?family=Big+Shoulders+Display:wght@800&family=Inter:wght@400;500;600;700&family=IBM+Plex+Mono:wght@500&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="">
+    <!-- Leaflet: map.js llama a L.map/L.tileLayer/L.marker como si la
+         librería ya estuviera cargada, pero no había ningún <link>/<script>
+         de Leaflet en la página. Se carga desde CDN (unpkg), CSS aquí y
+         el JS al final del <body>, antes de app.js. -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+          integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
+          crossorigin="">
     <link rel="stylesheet" href="/css/style.css">
 </head>
 <body>
@@ -25,8 +35,12 @@
                 </svg>
                 <h1 class="app-header__wordmark">Servi<span>Cuba</span></h1>
             </div>
-            <div id="user-menu-guest"><button id="loginBtn" class="btn btn-primary btn-sm">Ingresar</button></div>
-            <div id="user-menu-auth" class="hidden"><button id="logoutBtn" class="btn btn-ghost btn-sm">Salir</button></div>
+            <div id="user-menu-guest">
+                <button id="loginBtn" class="btn btn-primary btn-sm">Ingresar</button>
+            </div>
+            <div id="user-menu-auth" class="hidden">
+                <button id="logoutBtn" class="btn btn-ghost btn-sm">Salir</button>
+            </div>
         </header>
 
         <div id="verificationBanner" class="verification-banner hidden">
@@ -34,43 +48,238 @@
             <button id="verifyNowBtn" class="btn btn-accent btn-sm">Verificar ahora</button>
         </div>
 
+        <!-- Selector de modo: un mismo usuario puede tener perfil de
+             cliente Y de trabajador a la vez. Este switch cambia entre
+             ambos paneles sin recargar la página — ver initModeSwitch()
+             en app.js. Tocar "Trabajador" sin tener ese perfil activo
+             todavía abre el formulario de activación en vez de fallar. -->
         <div id="modoSwitch" class="mode-switch hidden">
-            <button type="button" class="mode-switch__btn is-active" data-modo="cliente">Cliente</button>
-            <button type="button" class="mode-switch__btn" data-modo="trabajador">Trabajador</button>
+            <button type="button" class="mode-switch__btn is-active" data-modo="cliente">
+                <svg class="icon" viewBox="0 0 24 24"><circle cx="12" cy="8" r="3.5"/><path d="M5 20c0-4 3-6.5 7-6.5s7 2.5 7 6.5"/></svg>
+                Cliente
+            </button>
+            <button type="button" class="mode-switch__btn" data-modo="trabajador">
+                <svg class="icon" viewBox="0 0 24 24"><path d="M14.7 6.3a4 4 0 0 0-5.4 5.4L4 17l3 3 5.3-5.3a4 4 0 0 0 5.4-5.4l-2.5 2.5-2-2 2.5-2.5Z"/></svg>
+                Trabajador
+            </button>
         </div>
 
         <main id="views" class="app-main">
+            <!-- Landing -->
             <div id="landing" class="view view--centered hidden">
-                <svg class="hero-stamp" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="11" fill="none" style="stroke:var(--ink)" stroke-width="0.9"/><circle cx="12" cy="12" r="9.3" fill="none" style="stroke:var(--copper)" stroke-width="0.5" stroke-dasharray="1.6 1.6"/><polygon points="18.06,15.5 12,19 5.94,15.5 5.94,8.5 12,5 18.06,8.5" fill="none" style="stroke:var(--ink)" stroke-width="1.1"/><circle cx="12" cy="12" r="2.3" style="fill:var(--accent)"/></svg>
+                <svg class="hero-stamp" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+                    <circle cx="12" cy="12" r="11" fill="none" style="stroke:var(--ink)" stroke-width="0.9"/>
+                    <circle cx="12" cy="12" r="9.3" fill="none" style="stroke:var(--copper)" stroke-width="0.5" stroke-dasharray="1.6 1.6"/>
+                    <polygon points="18.06,15.5 12,19 5.94,15.5 5.94,8.5 12,5 18.06,8.5" fill="none" style="stroke:var(--ink)" stroke-width="1.1" stroke-linejoin="round"/>
+                    <circle cx="12" cy="12" r="2.3" style="fill:var(--accent)"/>
+                </svg>
                 <h2 class="view-title">¿Qué necesitas reparar hoy?</h2>
                 <p id="heroWorkerCount" class="view-subtitle">Buscando trabajadores disponibles…</p>
-                <div class="hero-search"><input type="text" id="heroSearchInput" class="field-input" placeholder="Ej: electricista, plomero, albañil…" autocomplete="off"><div id="heroSearchResults" class="hero-search__results hidden"></div></div>
-                <div class="stack-md mt-md"><button id="registerBtn" class="btn btn-accent btn-block">Registrarme</button><button id="loginBtn2" class="btn btn-primary btn-block">Ya tengo cuenta</button></div>
+                <div class="hero-search">
+                    <input type="text" id="heroSearchInput" class="field-input" placeholder="Ej: electricista, plomero, albañil…" autocomplete="off">
+                    <div id="heroSearchResults" class="hero-search__results hidden"></div>
+                </div>
+                <div class="stack-md mt-md">
+                    <button id="registerBtn" class="btn btn-accent btn-block">Registrarme</button>
+                    <button id="loginBtn2" class="btn btn-primary btn-block">Ya tengo cuenta</button>
+                </div>
             </div>
 
-            <div id="register" class="view hidden"><h2 class="view-title">Crear cuenta</h2><p class="view-subtitle" style="margin:0 0 16px">Tu cuenta siempre puede publicar tareas. Si además ofreces un oficio, actívalo aquí o después desde tu perfil.</p><form id="registerForm" class="stack-md"><input type="text" id="regNombre" placeholder="Nombre completo" class="field-input" required><input type="tel" id="regTelefono" placeholder="Teléfono" class="field-input" required><input type="password" id="regPassword" placeholder="Contraseña" class="field-input" required><label class="field-checkbox"><input type="checkbox" id="regEsTrabajador"> ¿También ofreces servicios? Activa tu perfil de trabajador</label><div id="categoriaField" class="hidden"><select id="regCategoria" class="field-input"></select></div><div id="ubicacionField" class="hidden stack-sm"><input type="text" id="regMunicipio" placeholder="Municipio" class="field-input"><input type="text" id="regZona" placeholder="Zona / Consejo popular" class="field-input"><button type="button" id="getGpsBtn" class="btn btn-secondary btn-block">Usar mi ubicación GPS</button></div><button type="submit" class="btn btn-accent btn-block">Registrarse</button></form></div>
+            <!-- Registro -->
+            <div id="register" class="view hidden">
+                <h2 class="view-title">Crear cuenta</h2>
+                <p class="view-subtitle" style="margin:0 0 16px">Tu cuenta siempre puede publicar tareas. Si además ofreces un oficio, actívalo aquí o después desde tu perfil.</p>
+                <form id="registerForm" class="stack-md">
+                    <input type="text" id="regNombre" placeholder="Nombre completo" class="field-input" required>
+                    <input type="tel" id="regTelefono" placeholder="Teléfono" class="field-input" required>
+                    <input type="password" id="regPassword" placeholder="Contraseña" class="field-input" required>
+                    <label class="field-checkbox">
+                        <input type="checkbox" id="regEsTrabajador">
+                        ¿También ofreces servicios? Activa tu perfil de trabajador
+                    </label>
+                    <div id="categoriaField" class="hidden">
+                        <select id="regCategoria" class="field-input"></select>
+                    </div>
+                    <div id="ubicacionField" class="hidden stack-sm">
+                        <input type="text" id="regMunicipio" placeholder="Municipio" class="field-input">
+                        <input type="text" id="regZona" placeholder="Zona / Consejo popular" class="field-input">
+                        <button type="button" id="getGpsBtn" class="btn btn-secondary btn-block">
+                            <svg class="icon" viewBox="0 0 24 24"><path d="M12 21s7-6.5 7-11.5A7 7 0 0 0 5 9.5C5 14.5 12 21 12 21Z"/><circle cx="12" cy="9.5" r="2.3"/></svg>
+                            Usar mi ubicación GPS
+                        </button>
+                    </div>
+                    <button type="submit" class="btn btn-accent btn-block">Registrarse</button>
+                </form>
+            </div>
 
-            <div id="login" class="view hidden"><h2 class="view-title">Iniciar sesión</h2><form id="loginForm" class="stack-md"><input type="tel" id="logTelefono" placeholder="Teléfono" class="field-input" required><input type="password" id="logPassword" placeholder="Contraseña" class="field-input" required><button type="submit" class="btn btn-primary btn-block">Ingresar</button><button type="button" id="forgotPasswordBtn" class="btn btn-ghost btn-block btn-sm">¿Olvidaste tu contraseña?</button></form></div>
+            <!-- Login -->
+            <div id="login" class="view hidden">
+                <h2 class="view-title">Iniciar sesión</h2>
+                <form id="loginForm" class="stack-md">
+                    <input type="tel" id="logTelefono" placeholder="Teléfono" class="field-input" required>
+                    <input type="password" id="logPassword" placeholder="Contraseña" class="field-input" required>
+                    <button type="submit" class="btn btn-primary btn-block">Ingresar</button>
+                    <button type="button" id="forgotPasswordBtn" class="btn btn-ghost btn-block btn-sm">¿Olvidaste tu contraseña?</button>
+                </form>
+            </div>
 
+            <!-- Dashboard Cliente -->
             <div id="dashboardCliente" class="view hidden">
-                <div class="view-header-row"><h2 class="view-title">Mis tareas</h2><button id="newTaskBtn" class="btn btn-accent btn-sm">+ Nueva tarea</button></div>
-                <div class="hero-search hero-search--dashboard"><input type="text" id="heroSearchInputAuth" class="field-input" placeholder="Buscar un oficio: plomero, electricista, albañil…" autocomplete="off"><div id="heroSearchResultsAuth" class="hero-search__results hidden"></div></div>
-                <div class="sub-tabs"><button class="sub-tab is-active" data-clientetab="tareas" type="button">Mis tareas</button><button class="sub-tab" data-clientetab="ofertas" type="button">Ofertas cercanas</button></div>
-                <div id="misTareasPanel" class="subtab-panel"><div id="misTareas" class="stack-sm"></div></div>
-                <div id="ofertasCercanasPanel" class="subtab-panel hidden"><div class="filter-row"><select id="filtroRadioOfertas" class="field-input field-input--auto"><option value="1">1 km</option><option value="3" selected>3 km</option><option value="5">5 km</option><option value="10">10 km</option></select><select id="filtroCategoriaOfertas" class="field-input field-input--auto"><option value="">Todas</option></select></div><div id="listaOfertasCercanas" class="stack-sm"></div></div>
+                <div class="view-header-row">
+                    <h2 class="view-title">Mis tareas</h2>
+                    <button id="newTaskBtn" class="btn btn-accent btn-sm">+ Nueva tarea</button>
+                </div>
+                <div class="sub-tabs">
+                    <button class="sub-tab is-active" data-clientetab="tareas" type="button">Mis tareas</button>
+                    <button class="sub-tab" data-clientetab="ofertas" type="button">Ofertas cercanas</button>
+                </div>
+                <div id="misTareasPanel" class="subtab-panel">
+                    <div id="misTareas" class="stack-sm"></div>
+                </div>
+                <div id="ofertasCercanasPanel" class="subtab-panel hidden">
+                    <div class="filter-row">
+                        <select id="filtroRadioOfertas" class="field-input field-input--auto">
+                            <option value="1">1 km</option>
+                            <option value="3" selected>3 km</option>
+                            <option value="5">5 km</option>
+                            <option value="10">10 km</option>
+                        </select>
+                        <select id="filtroCategoriaOfertas" class="field-input field-input--auto">
+                            <option value="">Todas</option>
+                        </select>
+                    </div>
+                    <div id="listaOfertasCercanas" class="stack-sm"></div>
+                </div>
             </div>
 
-            <div id="dashboardTrabajador" class="view hidden"><div class="view-header-row"><h2 class="view-title">Tareas cercanas</h2><button id="newOfertaBtn" class="btn btn-accent btn-sm">+ Publicar servicio</button></div><div class="sub-tabs"><button class="sub-tab is-active" data-trabajadortab="cercanas" type="button">Tareas cercanas</button><button class="sub-tab" data-trabajadortab="ofertas" type="button">Mis ofertas</button></div><div id="tareasCercanasPanel" class="subtab-panel"><div id="adBannerTrabajador"></div><div class="filter-row"><select id="filtroRadio" class="field-input field-input--auto"><option value="1">1 km</option><option value="3" selected>3 km</option><option value="5">5 km</option><option value="10">10 km</option></select><select id="filtroCategoria" class="field-input field-input--auto"><option value="">Todas</option></select></div><div id="listaTareas" class="stack-sm"></div><button id="toggleMapBtn" class="btn btn-secondary btn-block mt-md">Ver tareas en mapa</button><div id="map" class="hidden map-box"></div></div><div id="misOfertasPanel" class="subtab-panel hidden"><div id="misOfertas" class="stack-sm"></div></div></div>
+            <!-- Dashboard Trabajador -->
+            <div id="dashboardTrabajador" class="view hidden">
+                <div class="view-header-row">
+                    <h2 class="view-title">Tareas cercanas</h2>
+                    <button id="newOfertaBtn" class="btn btn-accent btn-sm">+ Publicar servicio</button>
+                </div>
+                <div class="sub-tabs">
+                    <button class="sub-tab is-active" data-trabajadortab="cercanas" type="button">Tareas cercanas</button>
+                    <button class="sub-tab" data-trabajadortab="ofertas" type="button">Mis ofertas</button>
+                </div>
+                <div id="tareasCercanasPanel" class="subtab-panel">
+                    <div id="adBannerTrabajador"></div>
+                    <div class="filter-row">
+                        <select id="filtroRadio" class="field-input field-input--auto">
+                            <option value="1">1 km</option>
+                            <option value="3" selected>3 km</option>
+                            <option value="5">5 km</option>
+                            <option value="10">10 km</option>
+                        </select>
+                        <select id="filtroCategoria" class="field-input field-input--auto">
+                            <option value="">Todas</option>
+                        </select>
+                    </div>
+                    <div id="listaTareas" class="stack-sm"></div>
+                    <button id="toggleMapBtn" class="btn btn-secondary btn-block mt-md">
+                        <svg class="icon" viewBox="0 0 24 24"><path d="M3 6l6-2 6 2 6-2v14l-6 2-6-2-6 2V6Z"/><path d="M9 4v14M15 6v14"/></svg>
+                        Ver tareas en mapa
+                    </button>
+                    <div id="map" class="hidden map-box"></div>
+                </div>
+                <div id="misOfertasPanel" class="subtab-panel hidden">
+                    <div id="misOfertas" class="stack-sm"></div>
+                </div>
+            </div>
 
-            <div id="mensajesView" class="view hidden"><h2 class="view-title">Mensajes</h2><div id="listaConversaciones" class="stack-sm"></div></div>
-            <div id="chatView" class="view hidden chat-view"><div class="chat-header"><button id="chatBackBtn" class="btn btn-ghost btn-sm" type="button">Atrás</button><div class="chat-header__info"><span id="chatOtroParticipante" class="chat-header__name"></span><span id="chatTareaTitulo" class="chat-header__task"></span></div></div><div id="chatMessages" class="chat-messages"></div><form id="chatForm" class="chat-input-row"><input type="text" id="chatInput" class="field-input" placeholder="Escribe un mensaje…" autocomplete="off"><button type="submit" class="btn btn-accent btn-sm">Enviar</button></form></div>
-            <div id="perfilView" class="view hidden"><h2 class="view-title">Mi perfil</h2><div id="perfilContenido"></div><div id="workerActivationSection"></div></div>
-            <div id="adminView" class="view hidden"><h2 class="view-title">Administración</h2><div id="adminContent"></div></div>
+            <!-- Mensajes -->
+            <div id="mensajesView" class="view hidden">
+                <h2 class="view-title">Mensajes</h2>
+                <div id="listaConversaciones" class="stack-sm"></div>
+            </div>
+
+            <!-- Chat de una tarea -->
+            <div id="chatView" class="view hidden chat-view">
+                <div class="chat-header">
+                    <button id="chatBackBtn" class="btn btn-ghost btn-sm" type="button">
+                        <svg class="icon" viewBox="0 0 24 24"><path d="M19 12H6M11 6l-6 6 6 6"/></svg>
+                        Atrás
+                    </button>
+                    <div class="chat-header__info">
+                        <span id="chatOtroParticipante" class="chat-header__name"></span>
+                        <span id="chatTareaTitulo" class="chat-header__task"></span>
+                    </div>
+                </div>
+                <div id="chatMessages" class="chat-messages"></div>
+                <form id="chatForm" class="chat-input-row">
+                    <input type="text" id="chatInput" class="field-input" placeholder="Escribe un mensaje…" autocomplete="off">
+                    <button type="submit" class="btn btn-accent btn-sm">
+                        Enviar
+                        <svg class="icon" viewBox="0 0 24 24"><path d="M4 12 20 4l-6 16-3-7-7-1Z"/></svg>
+                    </button>
+                </form>
+            </div>
+
+            <!-- Perfil -->
+            <div id="perfilView" class="view hidden">
+                <h2 class="view-title">Mi perfil</h2>
+                <div id="perfilContenido"></div>
+                <div id="workerActivationSection" class="mt-md"></div>
+                <div id="premiumSection" class="mt-md"></div>
+                <button id="sponsorAdBtn" class="btn btn-secondary btn-block mt-md">
+                    <svg class="icon" viewBox="0 0 24 24"><path d="M3 6l6-2 6 2 6-2v14l-6 2-6-2-6 2V6Z"/><path d="M9 4v14M15 6v14"/></svg>
+                    Anunciar tu negocio
+                </button>
+                <button id="enablePushBtn" class="btn btn-secondary btn-block mt-md">
+                    <svg class="icon" viewBox="0 0 24 24"><path d="M12 3a5 5 0 0 0-5 5v3.5L5 15h14l-2-3.5V8a5 5 0 0 0-5-5Z"/><path d="M10 18a2 2 0 0 0 4 0"/></svg>
+                    Activar notificaciones
+                </button>
+                <button id="adminPanelBtn" class="btn btn-primary btn-block mt-md hidden">
+                    <svg class="icon" viewBox="0 0 24 24"><path d="M12 3l7 3v6c0 4.5-3 7.5-7 9-4-1.5-7-4.5-7-9V6l7-3Z"/></svg>
+                    Panel de administración
+                </button>
+            </div>
+
+            <!-- Admin -->
+            <div id="adminView" class="view hidden">
+                <div class="chat-header" style="border-bottom:none;margin-bottom:6px">
+                    <button id="adminBackBtn" class="btn btn-ghost btn-sm" type="button">
+                        <svg class="icon" viewBox="0 0 24 24"><path d="M19 12H6M11 6l-6 6 6 6"/></svg>
+                        Atrás
+                    </button>
+                </div>
+                <h2 class="view-title">Administración</h2>
+                <div class="admin-tabs">
+                    <button class="admin-tab is-active" data-tab="pagos" type="button">Pagos</button>
+                    <button class="admin-tab" data-tab="anuncios" type="button">Anuncios</button>
+                    <button class="admin-tab" data-tab="categorias" type="button">Categorías</button>
+                    <button class="admin-tab" data-tab="usuarios" type="button">Usuarios</button>
+                </div>
+                <div id="adminPagos" class="stack-sm mt-md"></div>
+                <div id="adminAnuncios" class="stack-sm mt-md hidden"></div>
+                <div id="adminCategorias" class="stack-sm mt-md hidden"></div>
+                <div id="adminUsuarios" class="stack-sm mt-md hidden"></div>
+            </div>
         </main>
 
-        <nav id="bottomNav" class="bottom-nav hidden"><button class="bottom-nav__item is-active" data-view="dashboardCliente">Inicio</button><button class="bottom-nav__item" data-view="mensajes">Mensajes</button><button class="bottom-nav__item" data-view="perfil">Perfil</button></nav>
+        <nav id="bottomNav" class="bottom-nav hidden">
+            <button class="bottom-nav__item is-active" data-view="dashboardCliente" type="button">
+                <svg class="icon bottom-nav__icon" viewBox="0 0 24 24"><path d="M4 11.5 12 4l8 7.5"/><path d="M6 10v9h12v-9"/><rect x="10" y="14" width="4" height="5"/></svg>
+                <span>Inicio</span>
+            </button>
+            <button class="bottom-nav__item" data-view="mensajes" type="button">
+                <svg class="icon bottom-nav__icon" viewBox="0 0 24 24"><path d="M4 5h16v11H9l-4 4V5Z"/></svg>
+                <span>Mensajes</span>
+                <span id="navMensajesBadge" class="badge-count badge-count--nav hidden">0</span>
+            </button>
+            <button class="bottom-nav__item" data-view="perfil" type="button">
+                <svg class="icon bottom-nav__icon" viewBox="0 0 24 24"><circle cx="12" cy="8" r="3.5"/><path d="M5 20c0-4 3-6.5 7-6.5s7 2.5 7 6.5"/></svg>
+                <span>Perfil</span>
+            </button>
+        </nav>
     </div>
-    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+
+    <!-- Leaflet debe cargar y ejecutarse ANTES de app.js: en cuanto se
+         toca "Mostrar mapa", map.js (importado por app.js) llama a
+         L.map(...) directamente. -->
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+            integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
+            crossorigin=""></script>
     <script type="module" src="/js/app.js"></script>
 </body>
 </html>
