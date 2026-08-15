@@ -76,7 +76,10 @@ function bindSearch(input, resultsBox) {
 
         resultsBox.querySelectorAll('.hero-search__item').forEach(btn => {
             btn.addEventListener('click', async () => {
-                sessionStorage.setItem('heroSelectedCategoriaId', btn.dataset.catId);
+                const categoryId = String(btn.dataset.catId);
+                const categoryName = btn.dataset.catNombre;
+                sessionStorage.setItem('heroSelectedCategoriaId', categoryId);
+                sessionStorage.setItem('heroSelectedCategoriaNombre', categoryName);
                 resultsBox.classList.add('hidden');
                 input.value = '';
 
@@ -84,15 +87,18 @@ function bindSearch(input, resultsBox) {
                 if (token) {
                     try {
                         await apiFetch('/users/profile');
-                        notify(`Oficio seleccionado: ${btn.dataset.catNombre}.`, 'info');
-                        showDashboardCliente();
+                        showDashboardCliente({ categoryId });
+                        notify(`Mostrando servicios de ${categoryName}.`, 'info');
                         return;
                     } catch {
                         // Sesión realmente expirada: continuar al login.
                     }
                 }
 
-                notify(`Inicia sesión para continuar con ${btn.dataset.catNombre}. Si no tienes cuenta, puedes registrarte desde el acceso de login.`, 'info');
+                // No forzamos registro: el usuario puede iniciar sesión y
+                // conservar la búsqueda para continuar directamente con el
+                // servicio/categoría seleccionado.
+                notify(`Inicia sesión para ver servicios de ${categoryName} cerca de ti.`, 'info');
                 showLogin();
             });
         });
@@ -139,9 +145,6 @@ export async function initLandingSearch() {
     if (initialized) return;
     initialized = true;
 
-    // app.js cambia entre landing/dashboard sin recargar. Cuando el dashboard
-    // aparece, creamos el mismo buscador para que la función no desaparezca
-    // después del login.
     const observer = new MutationObserver(() => {
         const authInputNow = ensureAuthenticatedSearch();
         const authResultsNow = document.getElementById('heroSearchResultsAuth');
