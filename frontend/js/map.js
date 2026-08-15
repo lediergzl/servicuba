@@ -5,8 +5,8 @@ let marker = null;
 let taskMarkers = [];
 
 const taskIcon = L.divIcon({
-    className: 'servicuba-task-marker',
-    html: '<span>●</span>',
+    className: '',
+    html: '<span style="display:block;width:18px;height:18px;border-radius:50%;background:#D9A441;border:3px solid #fff;box-shadow:0 1px 5px rgba(0,0,0,.45)"></span>',
     iconSize: [24, 24],
     iconAnchor: [12, 12],
     popupAnchor: [0, -12]
