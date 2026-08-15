@@ -1,11 +1,6 @@
 // ============================================================
 // Hero de la landing: buscador instantáneo de oficios + contador
 // dinámico de trabajadores disponibles.
-//
-// Diseño pensado para conexiones lentas (mismo criterio que el resto
-// de la app): UNA sola petición al cargar (categorías + conteos), y el
-// filtrado por tecla se hace 100% en el cliente — nada de golpear la
-// red en cada letra que el usuario escribe.
 // ============================================================
 import { apiFetch, escapeHtml, notify } from './core.js';
 import { showRegister } from './auth.js';
@@ -29,7 +24,7 @@ export async function initLandingSearch() {
     const input = document.getElementById('heroSearchInput');
     const resultsBox = document.getElementById('heroSearchResults');
     const countEl = document.getElementById('heroWorkerCount');
-    if (!input) return; // la landing no está en el DOM (no debería pasar)
+    if (!input) return;
 
     try {
         const [cats, stats] = await Promise.all([
@@ -44,8 +39,6 @@ export async function initLandingSearch() {
                 : 'Publica tu necesidad y recibe postulaciones en minutos.';
         }
     } catch {
-        // Sin conexión o falla la carga: el hero sigue funcionando como
-        // landing simple, sin buscador activo.
         if (countEl) countEl.textContent = 'Publica tu necesidad y recibe postulaciones en minutos.';
         return;
     }
@@ -62,7 +55,6 @@ export async function initLandingSearch() {
     function renderResults(query) {
         if (!resultsBox || !categoriesCache) return;
         const q = normalize(query.trim());
-
         if (!q) {
             resultsBox.classList.add('hidden');
             resultsBox.innerHTML = '';
@@ -70,7 +62,6 @@ export async function initLandingSearch() {
         }
 
         const matches = categoriesCache.filter(c => normalize(c.nombre).includes(q));
-
         if (!matches.length) {
             resultsBox.innerHTML = '<p class="empty-state">No encontramos ese oficio todavía. ¡Regístrate y publica tu tarea igual!</p>';
             resultsBox.classList.remove('hidden');
@@ -92,21 +83,30 @@ export async function initLandingSearch() {
         resultsBox.classList.remove('hidden');
 
         resultsBox.querySelectorAll('.hero-search__item').forEach(btn => {
-            btn.addEventListener('click', () => {
-                // Se guarda para poder pre-rellenar "Nueva tarea" apenas
-                // el usuario tenga cuenta — no bloquea el registro si no
-                // se usa en ningún otro lado todavía.
+            btn.addEventListener('click', async () => {
                 sessionStorage.setItem('heroSelectedCategoriaId', btn.dataset.catId);
                 resultsBox.classList.add('hidden');
                 input.value = '';
 
-                if (localStorage.getItem('token')) {
-                    // Ya tiene cuenta — no tiene sentido mandarlo a "Crear cuenta".
-                    notify(`Toca "+ Nueva tarea" para publicar tu necesidad de ${btn.dataset.catNombre}.`, 'info');
-                    showDashboardCliente();
-                    return;
+                // No confiamos únicamente en la presencia del token: puede
+                // haber expirado mientras la landing seguía abierta. Validar
+                // la sesión aquí evita mandar a una cuenta autenticada al
+                // registro por error.
+                const token = localStorage.getItem('token');
+                if (token) {
+                    try {
+                        await apiFetch('/users/profile');
+                        notify(`Oficio seleccionado: ${btn.dataset.catNombre}.`, 'info');
+                        showDashboardCliente();
+                        return;
+                    } catch {
+                        // apiFetch ya elimina el token y emite auth:expired
+                        // si la sesión realmente expiró. En ese caso sí debe
+                        // continuar hacia registro/inicio de sesión.
+                    }
                 }
 
+                sessionStorage.removeItem('heroSelectedCategoriaId');
                 notify(`Regístrate para publicar tu necesidad de ${btn.dataset.catNombre} y recibir postulaciones.`, 'info');
                 showRegister();
             });
