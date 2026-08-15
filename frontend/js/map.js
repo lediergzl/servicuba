@@ -57,12 +57,35 @@ async function loadMapTasks(lat, lng) {
 
 async function getCurrentPosition() {
     return new Promise((resolve, reject) => {
+        if (!navigator.geolocation) {
+            const error = new Error('Tu navegador no ofrece geolocalización.');
+            error.code = 2;
+            reject(error);
+            return;
+        }
         navigator.geolocation.getCurrentPosition(resolve, reject, {
             enableHighAccuracy: true,
             timeout: 10000,
             maximumAge: 60000
         });
     });
+}
+
+function locationHelp(err) {
+    const code = err?.code;
+    if (code === 1) {
+        notify('Ubicación bloqueada. Revisa el icono de ubicación/candado junto a la dirección del navegador, permite la ubicación para ServiCuba y vuelve a pulsar el mapa. Si la bloqueaste permanentemente, cambia el permiso desde la configuración del sitio del navegador.', 'error');
+        return;
+    }
+    if (code === 2) {
+        notify('No pudimos determinar tu ubicación. Comprueba que la ubicación/GPS esté activa en tu dispositivo y vuelve a intentarlo.', 'error');
+        return;
+    }
+    if (code === 3) {
+        notify('La ubicación tardó demasiado. Activa el GPS/ubicación y vuelve a intentarlo.', 'error');
+        return;
+    }
+    notify(`No se pudo obtener tu ubicación: ${err?.message || 'error desconocido'}.`, 'error');
 }
 
 export function initMap() {
@@ -99,11 +122,7 @@ export function initMap() {
             const count = await loadMapTasks(lat, lng);
             if (!count) notify('No hay tareas activas dentro del radio seleccionado.', 'info');
         } catch (err) {
-            if (err?.code != null) {
-                notify('Activa el GPS para ver las tareas cercanas en el mapa.', 'error');
-            } else {
-                notify(`No se pudo cargar el mapa: ${err.message || 'error desconocido'}`, 'error');
-            }
+            locationHelp(err);
         }
     });
 
@@ -113,8 +132,8 @@ export function initMap() {
             try {
                 const pos = await getCurrentPosition();
                 await loadMapTasks(pos.coords.latitude, pos.coords.longitude);
-            } catch {
-                // La lista principal gestiona el error de geolocalización.
+            } catch (err) {
+                locationHelp(err);
             }
         });
     });
