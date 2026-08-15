@@ -3,11 +3,12 @@
 // dinámico de trabajadores disponibles.
 // ============================================================
 import { apiFetch, escapeHtml, notify } from './core.js';
-import { showRegister } from './auth.js';
+import { showLogin } from './auth.js';
 import { showDashboardCliente } from './tasks.js';
 
 let categoriesCache = null;
 let countsCache = null;
+let initialized = false;
 
 function normalize(str) {
     return (str || '')
@@ -20,40 +21,31 @@ function pluralize(n, singular, plural) {
     return n === 1 ? singular : plural;
 }
 
-export async function initLandingSearch() {
-    const input = document.getElementById('heroSearchInput');
-    const resultsBox = document.getElementById('heroSearchResults');
-    const countEl = document.getElementById('heroWorkerCount');
-    if (!input) return;
+function ensureAuthenticatedSearch() {
+    if (!document.getElementById('dashboardCliente')) return null;
+    if (document.getElementById('heroSearchInputAuth')) return document.getElementById('heroSearchInputAuth');
 
-    try {
-        const [cats, stats] = await Promise.all([
-            apiFetch('/categories'),
-            apiFetch('/users/stats/workers-count'),
-        ]);
-        categoriesCache = cats;
-        countsCache = stats;
-        if (countEl) {
-            countEl.textContent = stats.total > 0
-                ? `${stats.total} ${pluralize(stats.total, 'trabajador disponible', 'trabajadores disponibles')} ahora mismo`
-                : 'Publica tu necesidad y recibe postulaciones en minutos.';
-        }
-    } catch {
-        if (countEl) countEl.textContent = 'Publica tu necesidad y recibe postulaciones en minutos.';
-        return;
-    }
+    const dashboard = document.getElementById('dashboardCliente');
+    const tabs = dashboard.querySelector('.sub-tabs');
+    if (!tabs) return null;
 
-    input.addEventListener('input', () => renderResults(input.value));
-    input.addEventListener('focus', () => renderResults(input.value));
+    const wrapper = document.createElement('div');
+    wrapper.className = 'hero-search hero-search--dashboard';
+    wrapper.innerHTML = `
+        <input type="text" id="heroSearchInputAuth" class="field-input"
+               placeholder="Buscar un oficio: plomero, electricista, albañil…" autocomplete="off">
+        <div id="heroSearchResultsAuth" class="hero-search__results hidden"></div>
+    `;
+    tabs.parentNode.insertBefore(wrapper, tabs);
+    return wrapper.querySelector('#heroSearchInputAuth');
+}
 
-    document.addEventListener('click', (e) => {
-        if (!resultsBox || resultsBox.classList.contains('hidden')) return;
-        if (e.target === input || resultsBox.contains(e.target)) return;
-        resultsBox.classList.add('hidden');
-    });
+function bindSearch(input, resultsBox) {
+    if (!input || !resultsBox || input.dataset.searchBound === '1') return;
+    input.dataset.searchBound = '1';
 
-    function renderResults(query) {
-        if (!resultsBox || !categoriesCache) return;
+    const renderResults = (query) => {
+        if (!categoriesCache) return;
         const q = normalize(query.trim());
         if (!q) {
             resultsBox.classList.add('hidden');
@@ -63,7 +55,7 @@ export async function initLandingSearch() {
 
         const matches = categoriesCache.filter(c => normalize(c.nombre).includes(q));
         if (!matches.length) {
-            resultsBox.innerHTML = '<p class="empty-state">No encontramos ese oficio todavía. Puedes registrarte para publicar tu necesidad.</p>';
+            resultsBox.innerHTML = '<p class="empty-state">No encontramos ese oficio todavía.</p>';
             resultsBox.classList.remove('hidden');
             return;
         }
@@ -88,9 +80,6 @@ export async function initLandingSearch() {
                 resultsBox.classList.add('hidden');
                 input.value = '';
 
-                // The landing search is public. An authenticated user must
-                // never be sent to registration just because the landing is
-                // still visible or the token check races with bootstrap.
                 const token = localStorage.getItem('token');
                 if (token) {
                     try {
@@ -99,15 +88,68 @@ export async function initLandingSearch() {
                         showDashboardCliente();
                         return;
                     } catch {
-                        // Only a genuinely invalid/expired session falls
-                        // through to authentication.
+                        // Sesión realmente expirada: continuar al login.
                     }
                 }
 
-                sessionStorage.removeItem('heroSelectedCategoriaId');
-                notify(`Regístrate para publicar tu necesidad de ${btn.dataset.catNombre} y recibir postulaciones.`, 'info');
-                showRegister();
+                notify(`Inicia sesión para continuar con ${btn.dataset.catNombre}. Si no tienes cuenta, puedes registrarte desde el acceso de login.`, 'info');
+                showLogin();
             });
         });
+    };
+
+    input.addEventListener('input', () => renderResults(input.value));
+    input.addEventListener('focus', () => renderResults(input.value));
+
+    resultsBox.addEventListener('click', e => e.stopPropagation());
+    document.addEventListener('click', e => {
+        if (e.target === input || resultsBox.contains(e.target)) return;
+        resultsBox.classList.add('hidden');
+    });
+}
+
+export async function initLandingSearch() {
+    const input = document.getElementById('heroSearchInput');
+    const resultsBox = document.getElementById('heroSearchResults');
+    const countEl = document.getElementById('heroWorkerCount');
+
+    try {
+        const [cats, stats] = await Promise.all([
+            apiFetch('/categories'),
+            apiFetch('/users/stats/workers-count'),
+        ]);
+        categoriesCache = cats;
+        countsCache = stats;
+        if (countEl) {
+            countEl.textContent = stats.total > 0
+                ? `${stats.total} ${pluralize(stats.total, 'trabajador disponible', 'trabajadores disponibles')} ahora mismo`
+                : 'Publica tu necesidad y recibe postulaciones en minutos.';
+        }
+    } catch {
+        if (countEl) countEl.textContent = 'Publica tu necesidad y recibe postulaciones en minutos.';
+        return;
     }
+
+    bindSearch(input, resultsBox);
+    ensureAuthenticatedSearch();
+    const authInput = document.getElementById('heroSearchInputAuth');
+    const authResults = document.getElementById('heroSearchResultsAuth');
+    bindSearch(authInput, authResults);
+
+    if (initialized) return;
+    initialized = true;
+
+    // app.js cambia entre landing/dashboard sin recargar. Cuando el dashboard
+    // aparece, creamos el mismo buscador para que la función no desaparezca
+    // después del login.
+    const observer = new MutationObserver(() => {
+        const authInputNow = ensureAuthenticatedSearch();
+        const authResultsNow = document.getElementById('heroSearchResultsAuth');
+        bindSearch(authInputNow, authResultsNow);
+    });
+    observer.observe(document.getElementById('views') || document.body, {
+        subtree: true,
+        attributes: true,
+        attributeFilter: ['class']
+    });
 }
