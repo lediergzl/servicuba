@@ -31,7 +31,6 @@ function applyPendingCategorySearch() {
     const offersTab = document.querySelector('.sub-tab[data-clientetab="ofertas"]');
     if (!select || !offersTab) return false;
 
-    // loadCategories() puede estar llenando el select en paralelo.
     const option = Array.from(select.options).find(o => String(o.value) === String(categoryId));
     if (!option) return false;
 
@@ -40,10 +39,6 @@ function applyPendingCategorySearch() {
     sessionStorage.removeItem('heroSelectedCategoriaId');
     sessionStorage.removeItem('heroSelectedCategoriaNombre');
 
-    // Abrir la pestaña de ofertas dispara loadNearbyOfertas(), que envía
-    // category_id al backend. No manipulamos la lista directamente: usamos
-    // el mismo flujo oficial del filtro para que radio/categoría permanezcan
-    // sincronizados.
     offersTab.click();
     return true;
 }
@@ -115,12 +110,12 @@ function bindSearch(input, resultsBox) {
                     try {
                         await apiFetch('/users/profile');
                         showDashboardCliente();
-                        // showDashboardCliente() oculta la pestaña de ofertas
-                        // al entrar; aplicamos el filtro después de que la vista
-                        // exista y usamos el mismo evento que el filtro manual.
                         pendingSearchApplied = false;
-                        const applied = applyPendingCategorySearch();
-                        if (!applied) setTimeout(applyPendingCategorySearch, 0);
+                        if (!applyPendingCategorySearch()) {
+                            setTimeout(applyPendingCategorySearch, 50);
+                            setTimeout(applyPendingCategorySearch, 250);
+                            setTimeout(applyPendingCategorySearch, 1000);
+                        }
                         notify(`Mostrando servicios de ${categoryName}.`, 'info');
                         return;
                     } catch {
@@ -128,9 +123,6 @@ function bindSearch(input, resultsBox) {
                     }
                 }
 
-                // No forzamos registro: el usuario puede iniciar sesión y
-                // conservar la búsqueda para continuar directamente con el
-                // servicio/categoría seleccionado.
                 notify(`Inicia sesión para ver servicios de ${categoryName} cerca de ti.`, 'info');
                 showLogin();
             });
@@ -184,14 +176,14 @@ export async function initLandingSearch() {
         const authResultsNow = document.getElementById('heroSearchResultsAuth');
         bindSearch(authInputNow, authResultsNow);
         if (!applyPendingCategorySearch() && sessionStorage.getItem('heroSelectedCategoriaId')) {
-            // loadCategories() y el dashboard pueden aparecer en distinto
-            // orden al restaurar una sesión; un segundo intento evita perder
-            // la búsqueda seleccionada durante el reload de login.
-            setTimeout(applyPendingCategorySearch, 0);
+            setTimeout(applyPendingCategorySearch, 50);
+            setTimeout(applyPendingCategorySearch, 250);
+            setTimeout(applyPendingCategorySearch, 1000);
         }
     });
     observer.observe(document.getElementById('views') || document.body, {
         subtree: true,
+        childList: true,
         attributes: true,
         attributeFilter: ['class']
     });
