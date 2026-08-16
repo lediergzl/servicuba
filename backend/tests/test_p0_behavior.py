@@ -30,6 +30,7 @@ class FakeDB:
         self.value = value
         self.audit = []
         self.commits = 0
+        self.rollbacks = 0
 
     def query(self, model):
         return FakeQuery(self.value)
@@ -41,7 +42,7 @@ class FakeDB:
         self.commits += 1
 
     def rollback(self):
-        pass
+        self.rollbacks += 1
 
     def refresh(self, value):
         pass
@@ -117,3 +118,26 @@ def test_reject_is_only_allowed_from_pending(monkeypatch):
     with pytest.raises(HTTPException) as exc:
         payments.reject_payment("p2", db=db, admin=admin)
     assert exc.value.status_code == 400
+
+
+def test_reject_rolls_back_when_commit_fails(monkeypatch):
+    payment = SimpleNamespace(
+        id="p3", tipo=PaymentType.ANUNCIO,
+        estado=PaymentStatus.PENDIENTE, confirmed_at=None
+    )
+    db = FakeDB(payment)
+    admin = SimpleNamespace(id="admin")
+    monkeypatch.setattr(payments, "_get_locked_payment", lambda _db, _id: payment)
+    monkeypatch.setattr(payments, "_audit", lambda *args, **kwargs: None)
+
+    def failing_commit():
+        db.commits += 1
+        raise RuntimeError("commit failed")
+
+    monkeypatch.setattr(db, "commit", failing_commit)
+
+    with pytest.raises(RuntimeError, match="commit failed"):
+        payments.reject_payment("p3", db=db, admin=admin)
+
+    assert db.commits == 1
+    assert db.rollbacks == 1
