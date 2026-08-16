@@ -95,7 +95,17 @@ def reject_payment(payment_id, db=Depends(get_db), admin=Depends(get_current_adm
     payment = _get_locked_payment(db, payment_id)
     if not payment: raise HTTPException(status_code=404, detail="Pago no encontrado")
     if payment.estado != PaymentStatus.PENDIENTE: raise HTTPException(status_code=400, detail="Este pago ya fue procesado")
-    payment.estado = PaymentStatus.RECHAZADO; payment.confirmed_at = datetime.utcnow(); _audit(db, admin, "PAYMENT_REJECTED", payment); db.commit(); db.refresh(payment); return payment
+    now = datetime.utcnow()
+    try:
+        payment.estado = PaymentStatus.RECHAZADO
+        payment.confirmed_at = now
+        _audit(db, admin, "PAYMENT_REJECTED", payment)
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+    db.refresh(payment)
+    return payment
 
 @router.post("/{payment_id}/refund", response_model=PaymentResponse)
 def refund_payment(payment_id, db=Depends(get_db), admin=Depends(get_current_admin)):
