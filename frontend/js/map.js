@@ -40,12 +40,9 @@ async function loadMapItems(lat, lng) {
     if (category) params.set('category_id', category);
 
     const authenticated = !!localStorage.getItem('token');
-    let endpoint;
-    if (!authenticated) {
-        endpoint = mode === 'trabajador' ? '/api/discovery/tasks/map' : '/api/discovery/offers/map';
-    } else {
-        endpoint = mode === 'trabajador' ? '/api/tasks/nearby' : '/api/tasks/ofertas/nearby';
-    }
+    const endpoint = !authenticated
+        ? (mode === 'trabajador' ? '/discovery/tasks/map' : '/discovery/offers/map')
+        : (mode === 'trabajador' ? '/tasks/nearby' : '/tasks/ofertas/nearby');
 
     try {
         const items = await apiFetch(`${endpoint}?${params.toString()}`);
@@ -119,9 +116,7 @@ function mountMapInActivePanel() {
     const panel = document.getElementById(panelId);
     if (!panel) return;
 
-    if (mapDiv.parentElement !== panel) {
-        panel.appendChild(mapDiv);
-    }
+    if (mapDiv.parentElement !== panel) panel.appendChild(mapDiv);
 }
 
 function toggleMap() {
