@@ -108,15 +108,29 @@ function ensureClientMapEntry() {
     button.className = 'btn btn-secondary btn-block mt-md';
     button.innerHTML = '<svg class="icon" viewBox="0 0 24 24"><path d="M3 6l6-2 6 2 6-2v14l-6 2-6-2-6 2V6Z"/><path d="M9 4v14M15 6v14"/></svg> Ver ofertas en mapa';
     panel.appendChild(button);
-    panel.appendChild(mapDiv);
+    button.addEventListener('click', toggleMap);
+}
 
-    button.addEventListener('click', () => toggleMap());
+function mountMapInActivePanel() {
+    const mapDiv = document.getElementById('map');
+    if (!mapDiv) return;
+    const mode = getMapMode();
+    const panelId = mode === 'trabajador' ? 'tareasCercanasPanel' : 'ofertasCercanasPanel';
+    const panel = document.getElementById(panelId);
+    if (!panel) return;
+
+    const anchorId = mode === 'trabajador' ? 'toggleMapBtn' : 'toggleMapBtnClient';
+    const anchor = document.getElementById(anchorId);
+    if (anchor && mapDiv.parentElement !== panel) {
+        panel.appendChild(mapDiv);
+    }
 }
 
 function toggleMap() {
     const mapDiv = document.getElementById('map');
     if (!mapDiv) return;
 
+    mountMapInActivePanel();
     const opening = mapDiv.classList.contains('hidden');
     mapDiv.classList.toggle('hidden', !opening);
     if (!opening) return;
@@ -133,7 +147,6 @@ function toggleMap() {
 
 export function initMap() {
     ensureClientMapEntry();
-
     document.getElementById('toggleMapBtn')?.addEventListener('click', toggleMap);
 
     ['filtroRadio', 'filtroCategoria', 'filtroRadioOfertas', 'filtroCategoriaOfertas'].forEach(id => {
