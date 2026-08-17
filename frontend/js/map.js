@@ -18,33 +18,48 @@ function clearTaskMarkers() {
     taskMarkers = [];
 }
 
-async function loadMapTasks(lat, lng) {
+function getMapMode() {
+    const mode = document.querySelector('.mode-switch__btn.is-active')?.dataset.modo;
+    if (mode === 'trabajador') return 'trabajador';
+    return 'cliente';
+}
+
+async function loadMapItems(lat, lng) {
     const radius = document.getElementById('filtroRadio')?.value || 5;
     const category = document.getElementById('filtroCategoria')?.value || '';
+    const mode = getMapMode();
     const params = new URLSearchParams({ lat: String(lat), lng: String(lng), radius_km: String(radius) });
     if (category) params.set('category_id', category);
 
     const authenticated = !!localStorage.getItem('token');
-    const endpoint = authenticated ? '/tasks/nearby' : '/discovery/tasks/map';
+    let endpoint;
+    if (!authenticated) {
+        endpoint = mode === 'trabajador' ? '/discovery/tasks/map' : '/discovery/offers';
+    } else {
+        endpoint = mode === 'trabajador' ? '/tasks/nearby' : '/tasks/ofertas/nearby';
+    }
 
     try {
-        const tasks = await apiFetch(`${endpoint}?${params.toString()}`);
+        const items = await apiFetch(`${endpoint}?${params.toString()}`);
         clearTaskMarkers();
-        if (!Array.isArray(tasks) || !tasks.length) return 0;
+        if (!Array.isArray(items) || !items.length) return 0;
 
-        tasks.forEach(t => {
-            const taskLat = Number(t.lat);
-            const taskLng = Number(t.lng);
-            if (!Number.isFinite(taskLat) || !Number.isFinite(taskLng)) return;
+        items.forEach(item => {
+            const itemLat = Number(item.lat);
+            const itemLng = Number(item.lng);
+            if (!Number.isFinite(itemLat) || !Number.isFinite(itemLng)) return;
 
-            const taskMarker = L.marker([taskLat, taskLng], { icon: taskIcon })
+            const title = item.titulo || item.titulo_oferta || item.categoria_nombre || 'Servicio disponible';
+            const price = item.precio ?? item.precio_hora ?? 0;
+            const distance = item.distancia_km ?? '';
+            const markerItem = L.marker([itemLat, itemLng], { icon: taskIcon })
                 .addTo(map)
                 .bindPopup(
-                    `<strong>${t.destacada ? '★ ' : ''}${escapeHtmlLocal(t.titulo)}</strong><br>`
-                    + `$${escapeHtmlLocal(String(t.precio ?? 0))} · ${escapeHtmlLocal(String(t.distancia_km ?? ''))} km`
+                    `<strong>${item.destacada ? '★ ' : ''}${escapeHtmlLocal(title)}</strong><br>`
+                    + `$${escapeHtmlLocal(String(price))} · ${escapeHtmlLocal(String(distance))} km`
                     + (!authenticated ? '<br><small>Ubicación aproximada · inicia sesión para contactar</small>' : '')
                 );
-            taskMarkers.push(taskMarker);
+            taskMarkers.push(markerItem);
         });
 
         if (taskMarkers.length > 0) {
@@ -55,7 +70,7 @@ async function loadMapTasks(lat, lng) {
         return taskMarkers.length;
     } catch (err) {
         clearTaskMarkers();
-        notify(`No se pudieron cargar las tareas en el mapa: ${err.message}`, 'error');
+        notify(`No se pudieron cargar los elementos en el mapa: ${err.message}`, 'error');
         return 0;
     }
 }
@@ -70,8 +85,8 @@ async function refreshMapTasks() {
         .addTo(map)
         .bindPopup(location.source === 'manual' ? 'Ubicación seleccionada' : 'Tu ubicación');
 
-    const count = await loadMapTasks(location.lat, location.lng);
-    if (!count) notify('No hay tareas activas dentro del radio seleccionado.', 'info');
+    const count = await loadMapItems(location.lat, location.lng);
+    if (!count) notify('No hay resultados dentro del radio seleccionado.', 'info');
 }
 
 export function initMap() {
