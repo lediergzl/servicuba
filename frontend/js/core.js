@@ -288,17 +288,113 @@ export function showConfirm({ title, message, confirmLabel = 'Confirmar', cancel
 
 // ---------- Geolocalización ----------
 
+const SAVED_LOCATION_KEY = 'servicuba:lastLocation';
+
+function readSavedLocation() {
+    try {
+        const value = JSON.parse(localStorage.getItem(SAVED_LOCATION_KEY) || 'null');
+        if (!value || !Number.isFinite(Number(value.lat)) || !Number.isFinite(Number(value.lng))) return null;
+        return { lat: Number(value.lat), lng: Number(value.lng), accuracy: value.accuracy || null, source: value.source || 'saved' };
+    } catch {
+        return null;
+    }
+}
+
+function toPosition(location) {
+    return {
+        coords: {
+            latitude: location.lat,
+            longitude: location.lng,
+            accuracy: location.accuracy || null
+        },
+        _servicubaSource: location.source || 'saved'
+    };
+}
+
+async function recoverGeolocation(error) {
+    const saved = readSavedLocation();
+    const message = geolocationErrorMessage(error);
+    const result = await showFormModal({
+        title: 'Necesitamos tu ubicación',
+        confirmLabel: 'Continuar',
+        cancelLabel: 'Cancelar',
+        fields: [
+            {
+                name: 'action',
+                label: 'Cómo quieres continuar',
+                type: 'select',
+                required: true,
+                value: saved ? 'saved' : 'retry',
+                options: [
+                    { value: 'retry', label: 'Volver a intentar ubicación del navegador' },
+                    ...(saved ? [{ value: 'saved', label: 'Usar última ubicación guardada' }] : []),
+                    { value: 'manual', label: 'Introducir ubicación manualmente' }
+                ]
+            },
+            {
+                name: 'lat',
+                label: 'Latitud',
+                type: 'number',
+                required: false,
+                step: '0.000001',
+                placeholder: 'Ej: 23.1136'
+            },
+            {
+                name: 'lng',
+                label: 'Longitud',
+                type: 'number',
+                required: false,
+                step: '0.000001',
+                placeholder: 'Ej: -82.3666'
+            }
+        ]
+    });
+
+    if (!result) throw error;
+
+    if (result.action === 'saved' && saved) {
+        return toPosition(saved);
+    }
+
+    if (result.action === 'manual') {
+        const lat = Number(result.lat);
+        const lng = Number(result.lng);
+        if (!Number.isFinite(lat) || !Number.isFinite(lng) || lat < -90 || lat > 90 || lng < -180 || lng > 180) {
+            notify('La latitud o longitud no es válida.', 'error');
+            return recoverGeolocation(new Error('La ubicación manual no es válida.'));
+        }
+        const location = { lat, lng, accuracy: null, source: 'manual' };
+        localStorage.setItem(SAVED_LOCATION_KEY, JSON.stringify(location));
+        return toPosition(location);
+    }
+
+    return getGeolocation();
+}
+
 export function getGeolocation() {
     return new Promise((resolve, reject) => {
         if (!navigator.geolocation) {
-            reject(new Error('Tu navegador no soporta geolocalización.'));
+            recoverGeolocation(new Error('Tu navegador no soporta geolocalización.')).then(resolve).catch(reject);
             return;
         }
-        navigator.geolocation.getCurrentPosition(resolve, reject, {
-            enableHighAccuracy: true,
-            timeout: 10000,
-            maximumAge: 60000
-        });
+        navigator.geolocation.getCurrentPosition(
+            position => {
+                const location = {
+                    lat: position.coords.latitude,
+                    lng: position.coords.longitude,
+                    accuracy: position.coords.accuracy || null,
+                    source: 'gps'
+                };
+                localStorage.setItem(SAVED_LOCATION_KEY, JSON.stringify(location));
+                resolve(position);
+            },
+            error => recoverGeolocation(error).then(resolve).catch(reject),
+            {
+                enableHighAccuracy: true,
+                timeout: 10000,
+                maximumAge: 60000
+            }
+        );
     });
 }
 
