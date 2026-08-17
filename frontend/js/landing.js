@@ -266,5 +266,10 @@ export async function initLandingSearch() {
             setTimeout(applyPendingCategorySearch, 1000);
         }
     });
-    observer.observe(document.body, { childList: true, subtree: true });
+    observer.observe(document.getElementById('views') || document.body, {
+        subtree: true,
+        childList: true,
+        attributes: true,
+        attributeFilter: ['class']
+    });
 }
