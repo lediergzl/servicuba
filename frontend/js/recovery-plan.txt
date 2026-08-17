@@ -1,0 +1,1 @@
+Restore app.js from known-good parent blob and remove temporary recovery markers.
