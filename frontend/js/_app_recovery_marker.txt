@@ -1,0 +1,1 @@
+Temporary recovery marker: app.js is being restored from the known-good parent blob before re-integrating the public landing bootstrap safely.
