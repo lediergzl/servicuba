@@ -21,6 +21,7 @@ function injectStyles() {
         .dashboard-presence__copy span { font-size:.74rem; opacity:.68; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
         .dashboard-presence__button { border:0; background:transparent; cursor:pointer; font:inherit; font-size:.74rem; font-weight:600; opacity:.82; }
         .dashboard-presence__button:hover { opacity:1; }
+        .dashboard-presence__button:disabled { opacity:.45; cursor:wait; }
         @media (max-width:640px) { .dashboard-presence { grid-template-columns:1fr; } }
     `;
     document.head.appendChild(style);
@@ -34,18 +35,18 @@ function getShells() {
 }
 
 function notificationState() {
-    if (!('Notification' in window) || !('PushManager' in window)) return { live:false, label:'No compatible', action:null };
-    if (Notification.permission === 'granted') return { live:true, label:'Activas en este dispositivo', action:'push' };
-    if (Notification.permission === 'denied') return { live:false, label:'Bloqueadas por el navegador', action:null };
-    return { live:false, label:'Activa avisos de nuevas solicitudes', action:'push' };
+    if (!('Notification' in window) || !('PushManager' in window)) return { live:false, label:'No compatible', action:null, actionLabel:'' };
+    if (Notification.permission === 'granted') return { live:true, label:'Activas en este dispositivo', action:'push', actionLabel:'Revisar' };
+    if (Notification.permission === 'denied') return { live:false, label:'Bloqueadas por el navegador', action:null, actionLabel:'' };
+    return { live:false, label:'Activa avisos de nuevas solicitudes', action:'push', actionLabel:'Activar' };
 }
 
 function locationState() {
     const location = getSavedLocation();
-    if (!location) return { live:false, label:'Ubicación no disponible', action:'location' };
+    if (!location) return { live:false, label:'Ubicación no disponible', action:'location', actionLabel:'Activar' };
     const accuracy = location.accuracy ? `±${Math.round(location.accuracy)} m` : 'posición guardada';
     const source = location.source === 'gps' ? 'GPS' : 'ubicación guardada';
-    return { live:true, label:`${source} · ${accuracy}`, action:'location' };
+    return { live:true, label:`${source} · ${accuracy}`, action:'location', actionLabel:'Actualizar' };
 }
 
 function renderPresence(shell) {
@@ -65,14 +66,14 @@ function renderPresence(shell) {
                 <span class="dashboard-presence__dot ${loc.live ? 'is-live' : 'is-warn'}"></span>
                 <span class="dashboard-presence__copy"><strong>Tu ubicación</strong><span>${loc.label}</span></span>
             </div>
-            ${loc.action ? '<button class="dashboard-presence__button" type="button" data-presence-action="location">Actualizar</button>' : ''}
+            ${loc.action ? `<button class="dashboard-presence__button" type="button" data-presence-action="location">${loc.actionLabel}</button>` : ''}
         </div>
         <div class="dashboard-presence__item">
             <div class="dashboard-presence__main">
                 <span class="dashboard-presence__dot ${push.live ? 'is-live' : ''}"></span>
                 <span class="dashboard-presence__copy"><strong>Notificaciones</strong><span>${push.label}</span></span>
             </div>
-            ${push.action ? '<button class="dashboard-presence__button" type="button" data-presence-action="push">${push.live ? 'Revisar' : 'Activar'}</button>' : ''}
+            ${push.action ? `<button class="dashboard-presence__button" type="button" data-presence-action="push">${push.actionLabel}</button>` : ''}
         </div>
     `;
 }
