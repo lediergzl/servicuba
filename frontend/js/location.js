@@ -18,13 +18,7 @@ async function requestGps() {
     }
 }
 
-export async function getLocationWithFallback({ allowManual = true } = {}) {
-    const first = await requestGps();
-    if (!first.error) return first;
-
-    const saved = getSavedLocation();
-    const message = geolocationErrorMessage(first.error);
-
+function buildRecoveryFields(saved, allowManual, message) {
     const fields = [
         {
             name: 'action',
@@ -47,48 +41,57 @@ export async function getLocationWithFallback({ allowManual = true } = {}) {
         );
     }
 
-    const result = await showFormModal({
-        title: 'Necesitamos tu ubicación',
-        confirmLabel: 'Continuar',
-        cancelLabel: 'Cancelar',
-        fields: [
-            {
-                name: 'info',
-                label: 'Estado',
-                type: 'text',
-                value: `${message} Si aparece un aviso del navegador, selecciona Permitir para ServiCuba.`,
-                required: false
-            },
-            ...fields
-        ]
-    });
+    return [
+        {
+            name: 'info',
+            label: 'Estado',
+            type: 'text',
+            value: `${message} Si aparece un aviso del navegador, selecciona Permitir para ServiCuba.`,
+            required: false
+        },
+        ...fields
+    ];
+}
 
-    if (result === null) return null;
+export async function getLocationWithFallback({ allowManual = true } = {}) {
+    let first = await requestGps();
+    if (!first.error) return first;
 
-    if (result.action === 'retry') {
-        const retry = await requestGps();
-        if (!retry.error) return retry;
+    while (true) {
+        const saved = getSavedLocation();
+        const message = geolocationErrorMessage(first.error);
+        const result = await showFormModal({
+            title: 'Necesitamos tu ubicación',
+            confirmLabel: 'Continuar',
+            cancelLabel: 'Cancelar',
+            fields: buildRecoveryFields(saved, allowManual, message)
+        });
 
-        notify(`${geolocationErrorMessage(retry.error)} Si sigue bloqueado, selecciona ubicación guardada o manual.`, 'error');
-        return saved || null;
-    }
+        if (result === null) return null;
 
-    if (result.action === 'saved' && saved) return saved;
+        if (result.action === 'saved' && saved) return saved;
 
-    if (result.action === 'manual' && allowManual) {
-        const lat = Number(result.lat);
-        const lng = Number(result.lng);
-        if (!Number.isFinite(lat) || !Number.isFinite(lng) || lat < -90 || lat > 90 || lng < -180 || lng > 180) {
-            notify('La latitud o longitud no es válida.', 'error');
-            return null;
+        if (result.action === 'manual' && allowManual) {
+            const lat = Number(result.lat);
+            const lng = Number(result.lng);
+            if (!Number.isFinite(lat) || !Number.isFinite(lng) || lat < -90 || lat > 90 || lng < -180 || lng > 180) {
+                notify('La latitud o longitud no es válida.', 'error');
+                continue;
+            }
+
+            const location = { lat, lng, accuracy: null, source: 'manual' };
+            localStorage.setItem(STORAGE_KEY, JSON.stringify(location));
+            return location;
         }
 
-        const location = { lat, lng, accuracy: null, source: 'manual' };
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(location));
-        return location;
-    }
+        if (result.action === 'retry') {
+            const retry = await requestGps();
+            if (!retry.error) return retry;
 
-    return null;
+            first = retry;
+            notify(`${geolocationErrorMessage(retry.error)} Puedes volver a intentarlo, usar una ubicación guardada o introducirla manualmente.`, 'error');
+        }
+    }
 }
 
 export function getSavedLocation() {
