@@ -37,35 +37,18 @@ function getLanding() { return document.getElementById('landing'); }
 function injectStory() {
     const landing = getLanding();
     if (!landing || landing.querySelector('.landing-product-story')) return;
-
     const story = document.createElement('section');
     story.className = 'landing-product-story';
     story.setAttribute('aria-label', 'Cómo funciona ServiCuba');
     story.innerHTML = `
-        <h3 class="landing-product-story__headline">Tus problemas, nuestras soluciones.</h3>
-        <p class="landing-product-story__sub">Explora primero. Regístrate solo cuando encuentres algo que quieras hacer.</p>
+        <h3 class="landing-product-story__headline">Tus problemas, mis soluciones.</h3>
+        <p class="landing-product-story__sub">Publica lo que necesitas — un trabajador cerca lo resuelve.</p>
         <div class="landing-product-story__steps">
-            <article class="landing-product-story__step">
-                <span class="landing-product-story__number">1</span>
-                <div class="landing-product-story__visual">🏠</div>
-                <strong>Publica lo que necesitas</strong>
-                <span>Plomero, electricista, repartidor o cualquier servicio. Cuenta qué necesitas y en qué zona.</span>
-            </article>
-            <article class="landing-product-story__step">
-                <span class="landing-product-story__number">2</span>
-                <div class="landing-product-story__visual">📍</div>
-                <strong>Encuentra opciones cerca</strong>
-                <span>Explora tareas y servicios por categoría y distancia, en lista o mapa cuando compartas ubicación.</span>
-            </article>
-            <article class="landing-product-story__step">
-                <span class="landing-product-story__number">3</span>
-                <div class="landing-product-story__visual">💬</div>
-                <strong>Conecten y acuerden</strong>
-                <span>Cuando quieras avanzar, crea tu cuenta y usa el chat interno para precio, horario y detalles.</span>
-            </article>
+            <article class="landing-product-story__step"><span class="landing-product-story__number">1</span><div class="landing-product-story__visual">🏠</div><strong>Publica lo que necesitas</strong><span>Plomero, electricista, repartidor o cualquier servicio. Cuenta qué necesitas y en qué zona.</span></article>
+            <article class="landing-product-story__step"><span class="landing-product-story__number">2</span><div class="landing-product-story__visual">📍</div><strong>Encuentra opciones cerca</strong><span>Explora tareas y servicios por categoría y distancia, en lista o mapa cuando compartas ubicación.</span></article>
+            <article class="landing-product-story__step"><span class="landing-product-story__number">3</span><div class="landing-product-story__visual">💬</div><strong>Conecten y acuerden</strong><span>Cuando quieras avanzar, crea tu cuenta y usa el chat interno para precio, horario y detalles.</span></article>
         </div>
     `;
-
     const search = landing.querySelector('.hero-search');
     const actions = landing.querySelector('.stack-md');
     if (search) search.after(story); else if (actions) actions.before(story); else landing.appendChild(story);
@@ -76,104 +59,38 @@ function injectPublicProof() {
     if (!landing || landing.querySelector('.landing-public-proof')) return;
     const proof = document.createElement('section');
     proof.className = 'landing-public-proof';
-    proof.innerHTML = `
-        <div class="landing-public-proof__row">
-            <div>
-                <p class="landing-public-proof__title">👀 Mira antes de registrarte</p>
-                <p class="landing-public-proof__text">Puedes descubrir servicios públicos sin entregar tus datos ni activar el GPS.</p>
-            </div>
-            <span class="landing-public-proof__badge">SIN CUENTA</span>
-        </div>
-        <button type="button" id="landingPublicDirectoryBtn" class="btn btn-secondary btn-block mt-md">Explorar por municipio</button>
-    `;
+    proof.innerHTML = `<div class="landing-public-proof__row"><div><p class="landing-public-proof__title">👀 Mira antes de registrarte</p><p class="landing-public-proof__text">Puedes descubrir servicios públicos sin entregar tus datos ni activar el GPS.</p></div><span class="landing-public-proof__badge">SIN CUENTA</span></div><button type="button" id="landingPublicDirectoryBtn" class="btn btn-secondary btn-block mt-md">Explorar por municipio</button>`;
     landing.appendChild(proof);
     proof.querySelector('#landingPublicDirectoryBtn')?.addEventListener('click', openMunicipioDirectory);
 }
 
 async function openMunicipioDirectory() {
-    const overlay = document.createElement('div');
-    overlay.className = 'modal-overlay landing-public-directory';
-    const modal = document.createElement('div');
-    modal.className = 'modal-card';
-    modal.innerHTML = `
-        <h2 class="modal-title">Explorar sin GPS</h2>
-        <p class="modal-message">Elige un municipio para ver servicios públicos. No necesitamos tu ubicación ni tu cuenta.</p>
-        <p class="landing-public-directory__hint">Municipio</p>
-        <input id="publicMunicipioInput" class="field-input" placeholder="Ej: Plaza, Playa, Centro Habana…" autocomplete="address-level2">
-        <select id="publicMunicipioTipo" class="field-input mt-sm">
-            <option value="oferta">Servicios ofrecidos</option>
-            <option value="necesidad">Tareas publicadas</option>
-        </select>
-        <div id="publicMunicipioResults" class="stack-sm mt-md"></div>
-        <div class="modal-actions"><button type="button" class="btn btn-ghost" id="publicMunicipioClose">Cerrar</button></div>
-    `;
-    overlay.appendChild(modal);
-    document.body.appendChild(overlay);
-
-    const input = modal.querySelector('#publicMunicipioInput');
-    const tipo = modal.querySelector('#publicMunicipioTipo');
-    const results = modal.querySelector('#publicMunicipioResults');
-    const close = () => overlay.remove();
-    modal.querySelector('#publicMunicipioClose').addEventListener('click', close);
-    overlay.addEventListener('click', e => { if (e.target === overlay) close(); });
-
+    const overlay = document.createElement('div'); overlay.className = 'modal-overlay landing-public-directory';
+    const modal = document.createElement('div'); modal.className = 'modal-card';
+    modal.innerHTML = `<h2 class="modal-title">Explorar sin GPS</h2><p class="modal-message">Elige un municipio para ver servicios públicos. No necesitamos tu ubicación ni tu cuenta.</p><p class="landing-public-directory__hint">Municipio</p><input id="publicMunicipioInput" class="field-input" placeholder="Ej: Plaza, Playa, Centro Habana…" autocomplete="address-level2"><select id="publicMunicipioTipo" class="field-input mt-sm"><option value="oferta">Servicios ofrecidos</option><option value="necesidad">Tareas publicadas</option></select><div id="publicMunicipioResults" class="stack-sm mt-md"></div><div class="modal-actions"><button type="button" class="btn btn-ghost" id="publicMunicipioClose">Cerrar</button></div>`;
+    overlay.appendChild(modal); document.body.appendChild(overlay);
+    const input = modal.querySelector('#publicMunicipioInput'); const tipo = modal.querySelector('#publicMunicipioTipo'); const results = modal.querySelector('#publicMunicipioResults'); const close = () => overlay.remove();
+    modal.querySelector('#publicMunicipioClose').addEventListener('click', close); overlay.addEventListener('click', e => { if (e.target === overlay) close(); });
     let timer = null;
     const load = async () => {
         const municipio = input.value.trim();
-        if (municipio.length < 2) {
-            results.innerHTML = '<p class="empty-state">Escribe al menos 2 letras del municipio.</p>';
-            return;
-        }
+        if (municipio.length < 2) { results.innerHTML = '<p class="empty-state">Escribe al menos 2 letras del municipio.</p>'; return; }
         results.innerHTML = '<p class="empty-state">Buscando opciones públicas…</p>';
         try {
-            const data = await apiFetch(`/discovery/directory?municipio=${encodeURIComponent(municipio)}&tipo=${encodeURIComponent(tipo.value)}`);
-            const items = Array.isArray(data) ? data : [];
-            if (!items.length) {
-                results.innerHTML = '<p class="empty-state">No encontramos publicaciones públicas en ese municipio todavía.</p>';
-                return;
-            }
-            results.innerHTML = items.slice(0, 20).map(item => `
-                <article class="task-card">
-                    <div class="task-card__row">
-                        <h3 class="task-card__title">${item.destacada ? '★ ' : ''}${escapeHtml(item.titulo)}</h3>
-                        <span class="task-card__price">$${escapeHtml(String(item.precio ?? 0))}</span>
-                    </div>
-                    <p class="task-card__meta">${escapeHtml(item.municipio || municipio)} · ${escapeHtml(item.categoria_nombre || 'Servicio')}</p>
-                    <p class="task-card__description">${escapeHtml(item.descripcion || 'Consulta los detalles al contactar.')}</p>
-                    <button type="button" class="btn btn-primary btn-block" data-public-login>Crear cuenta para contactar</button>
-                </article>
-            `).join('');
-        } catch (err) {
-            results.innerHTML = `<p class="empty-state">No pudimos cargar el directorio ahora. ${escapeHtml(err.message || '')}</p>`;
-        }
+            const data = await apiFetch(`/discovery/directory?municipio=${encodeURIComponent(municipio)}&tipo=${encodeURIComponent(tipo.value)}`); const items = Array.isArray(data) ? data : [];
+            if (!items.length) { results.innerHTML = '<p class="empty-state">No encontramos publicaciones públicas en ese municipio todavía.</p>'; return; }
+            results.innerHTML = items.slice(0,20).map(item => `<article class="task-card"><div class="task-card__row"><h3 class="task-card__title">${item.destacada ? '★ ' : ''}${escapeHtml(item.titulo)}</h3><span class="task-card__price">$${escapeHtml(String(item.precio ?? 0))}</span></div><p class="task-card__meta">${escapeHtml(item.municipio || municipio)} · ${escapeHtml(item.categoria_nombre || 'Servicio')}</p><p class="task-card__description">${escapeHtml(item.descripcion || 'Consulta los detalles al contactar.')}</p><button type="button" class="btn btn-primary btn-block" data-public-login>Crear cuenta para contactar</button></article>`).join('');
+        } catch (err) { results.innerHTML = `<p class="empty-state">No pudimos cargar el directorio ahora. ${escapeHtml(err.message || '')}</p>`; }
     };
-    input.addEventListener('input', () => { clearTimeout(timer); timer = setTimeout(load, 350); });
-    tipo.addEventListener('change', load);
-    results.addEventListener('click', e => {
-        if (!e.target.closest('[data-public-login]')) return;
-        close();
-        showLogin();
-    });
-    input.focus();
+    input.addEventListener('input', () => { clearTimeout(timer); timer = setTimeout(load, 350); }); tipo.addEventListener('change', load);
+    results.addEventListener('click', e => { if (!e.target.closest('[data-public-login]')) return; close(); showLogin(); }); input.focus();
 }
 
 function showGpsFriendlyMessage() {
-    const landing = getLanding();
-    if (!landing || landing.querySelector('.landing-gps-hint')) return;
-    const hint = document.createElement('p');
-    hint.className = 'landing-gps-hint view-subtitle';
-    hint.style.cssText = 'margin:10px 0 0;font-size:.76rem';
-    hint.textContent = 'El GPS es opcional. Puedes explorar por municipio sin compartir tu ubicación.';
-    const search = landing.querySelector('.hero-search');
-    search?.after(hint);
+    const landing = getLanding(); if (!landing || landing.querySelector('.landing-gps-hint')) return;
+    const hint = document.createElement('p'); hint.className = 'landing-gps-hint view-subtitle'; hint.style.cssText = 'margin:10px 0 0;font-size:.76rem'; hint.textContent = 'El GPS es opcional. Puedes explorar por municipio sin compartir tu ubicación.';
+    landing.querySelector('.hero-search')?.after(hint);
 }
 
-export function initLandingPublicExperience() {
-    injectStyles();
-    injectStory();
-    injectPublicProof();
-    showGpsFriendlyMessage();
-}
-
-if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', initLandingPublicExperience, { once:true });
-else initLandingPublicExperience();
+export function initLandingPublicExperience() { injectStyles(); injectStory(); injectPublicProof(); showGpsFriendlyMessage(); }
+if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', initLandingPublicExperience, { once:true }); else initLandingPublicExperience();
