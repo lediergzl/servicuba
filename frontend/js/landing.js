@@ -1,10 +1,11 @@
 // ============================================================
-// Hero de la landing: buscador instantáneo de oficios + contador
+// Hero de la landing: descubrimiento público de oficios + contador
 // dinámico de trabajadores disponibles.
 // ============================================================
-import { apiFetch, escapeHtml, notify } from './core.js';
+import { apiFetch, escapeHtml, notify, showFormModal } from './core.js';
 import { showLogin } from './auth.js';
 import { showDashboardCliente } from './tasks.js';
+import { getLocationWithFallback } from './location.js';
 
 let categoriesCache = null;
 let countsCache = null;
@@ -40,6 +41,9 @@ function applyPendingCategorySearch() {
     sessionStorage.removeItem('heroSelectedCategoriaNombre');
 
     offersTab.click();
+    // El click puede cambiar de panel de forma asíncrona; disparar change
+    // garantiza que el filtro seleccionado sea realmente aplicado.
+    select.dispatchEvent(new Event('change', { bubbles: true }));
     return true;
 }
 
@@ -60,6 +64,76 @@ function ensureAuthenticatedSearch() {
     `;
     tabs.parentNode.insertBefore(wrapper, tabs);
     return wrapper.querySelector('#heroSearchInputAuth');
+}
+
+async function showPublicCategoryResults(categoryId, categoryName) {
+    const location = await getLocationWithFallback();
+    if (!location) return;
+
+    let results;
+    try {
+        results = await apiFetch(`/discovery/tasks?lat=${encodeURIComponent(location.lat)}&lng=${encodeURIComponent(location.lng)}&radius_km=10&category_id=${encodeURIComponent(categoryId)}`);
+    } catch (err) {
+        notify(`No pudimos buscar servicios de ${categoryName}: ${err.message}`, 'error');
+        return;
+    }
+
+    const items = Array.isArray(results) ? results : [];
+    const overlay = document.createElement('div');
+    overlay.className = 'modal-overlay';
+    const modal = document.createElement('div');
+    modal.className = 'modal-card';
+
+    const heading = document.createElement('h2');
+    heading.className = 'modal-title';
+    heading.textContent = `${categoryName} cerca de ti`;
+    modal.appendChild(heading);
+
+    const subtitle = document.createElement('p');
+    subtitle.className = 'modal-message';
+    subtitle.textContent = items.length
+        ? `${items.length} resultado${items.length === 1 ? '' : 's'} encontrado${items.length === 1 ? '' : 's'}. Inicia sesión para contactar o postularte.`
+        : 'No encontramos tareas de este oficio dentro del radio de búsqueda.';
+    modal.appendChild(subtitle);
+
+    const list = document.createElement('div');
+    list.className = 'stack-sm';
+    if (items.length) {
+        items.slice(0, 20).forEach(t => {
+            const row = document.createElement('div');
+            row.className = 'task-card';
+            row.innerHTML = `
+                <div class="task-card__row">
+                    <h3 class="task-card__title">${t.destacada ? '★ ' : ''}${escapeHtml(t.titulo)}</h3>
+                    <span class="task-card__price">$${escapeHtml(String(t.precio ?? 0))}</span>
+                </div>
+                <p class="task-card__meta"><span class="chip">${escapeHtml(String(t.distancia_km ?? ''))} km</span></p>
+                <button type="button" class="btn btn-primary btn-block" data-action="login">Iniciar sesión para contactar</button>
+            `;
+            list.appendChild(row);
+        });
+    }
+    modal.appendChild(list);
+
+    const actions = document.createElement('div');
+    actions.className = 'modal-actions';
+    const closeBtn = document.createElement('button');
+    closeBtn.type = 'button';
+    closeBtn.className = 'btn btn-ghost';
+    closeBtn.textContent = 'Cerrar';
+    actions.appendChild(closeBtn);
+    modal.appendChild(actions);
+
+    overlay.appendChild(modal);
+    document.body.appendChild(overlay);
+    const close = () => overlay.remove();
+    closeBtn.addEventListener('click', close);
+    overlay.addEventListener('click', e => { if (e.target === overlay) close(); });
+    list.addEventListener('click', e => {
+        if (!e.target.closest('[data-action="login"]')) return;
+        close();
+        showLogin();
+    });
 }
 
 function bindSearch(input, resultsBox) {
@@ -119,12 +193,13 @@ function bindSearch(input, resultsBox) {
                         notify(`Mostrando servicios de ${categoryName}.`, 'info');
                         return;
                     } catch {
-                        // Sesión realmente expirada: continuar al login.
+                        // Sesión realmente expirada: continuar al descubrimiento público.
                     }
                 }
 
-                notify(`Inicia sesión para ver servicios de ${categoryName} cerca de ti.`, 'info');
-                showLogin();
+                // Un visitante puede explorar primero. El login sólo aparece
+                // cuando intenta contactar, no al seleccionar el oficio.
+                await showPublicCategoryResults(categoryId, categoryName);
             });
         });
     };
