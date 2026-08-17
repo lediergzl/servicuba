@@ -256,20 +256,21 @@ export async function initLandingSearch() {
     if (initialized) return;
     initialized = true;
 
+    const observerTarget = document.getElementById('views');
+    if (!observerTarget) return;
+
     const observer = new MutationObserver(() => {
         const authInputNow = ensureAuthenticatedSearch();
         const authResultsNow = document.getElementById('heroSearchResultsAuth');
         bindSearch(authInputNow, authResultsNow);
-        if (!applyPendingCategorySearch() && sessionStorage.getItem('heroSelectedCategoriaId')) {
-            setTimeout(applyPendingCategorySearch, 50);
-            setTimeout(applyPendingCategorySearch, 250);
-            setTimeout(applyPendingCategorySearch, 1000);
-        }
+        applyPendingCategorySearch();
     });
-    observer.observe(document.getElementById('views') || document.body, {
+
+    // Solo necesitamos detectar cuando se inserta el dashboard. Observar
+    // atributos/clases provoca una enorme cantidad de mutaciones durante
+    // el render de tareas y puede bloquear el arranque de la aplicación.
+    observer.observe(observerTarget, {
         subtree: true,
-        childList: true,
-        attributes: true,
-        attributeFilter: ['class']
+        childList: true
     });
 }
