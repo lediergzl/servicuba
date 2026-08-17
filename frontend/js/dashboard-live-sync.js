@@ -1,5 +1,6 @@
 import { apiFetch, notify } from './core.js';
 import { loadNearbyTasks, loadNearbyOfertas } from './tasks.js';
+import './dashboard-card-ux.js';
 
 let syncTimer = null;
 let syncInFlight = false;
