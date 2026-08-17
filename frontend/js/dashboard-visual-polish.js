@@ -1,3 +1,5 @@
+import './landing-experience.js';
+
 const STYLE_ID = 'servicuba-dashboard-visual-polish';
 
 function injectStyles() {
