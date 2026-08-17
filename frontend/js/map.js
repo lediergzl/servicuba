@@ -24,8 +24,11 @@ async function loadMapTasks(lat, lng) {
     const params = new URLSearchParams({ lat: String(lat), lng: String(lng), radius_km: String(radius) });
     if (category) params.set('category_id', category);
 
+    const authenticated = !!localStorage.getItem('token');
+    const endpoint = authenticated ? '/tasks/nearby' : '/discovery/tasks';
+
     try {
-        const tasks = await apiFetch(`/tasks/nearby?${params.toString()}`);
+        const tasks = await apiFetch(`${endpoint}?${params.toString()}`);
         clearTaskMarkers();
         if (!Array.isArray(tasks) || !tasks.length) return 0;
 
@@ -39,6 +42,7 @@ async function loadMapTasks(lat, lng) {
                 .bindPopup(
                     `<strong>${t.destacada ? '★ ' : ''}${escapeHtmlLocal(t.titulo)}</strong><br>`
                     + `$${escapeHtmlLocal(String(t.precio ?? 0))} · ${escapeHtmlLocal(String(t.distancia_km ?? ''))} km`
+                    + (!authenticated ? '<br><small>Inicia sesión para contactar</small>' : '')
                 );
             taskMarkers.push(taskMarker);
         });
@@ -86,17 +90,6 @@ export function initMap() {
             }).addTo(map);
         }
         setTimeout(() => map.invalidateSize(), 0);
-
-        // La vista del mapa sigue siendo una función autenticada porque
-        // /tasks/nearby protege datos operativos. Lo que cambia aquí es que
-        // la ubicación ya no deja al usuario atrapado en un toast: si el
-        // navegador la bloquea, se ofrecen reintento, última ubicación o
-        // coordenadas manuales.
-        if (!localStorage.getItem('token')) {
-            notify('Inicia sesión para cargar las tareas del mapa.', 'error');
-            return;
-        }
-
         await refreshMapTasks();
     });
 
