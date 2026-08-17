@@ -1,9 +1,13 @@
 from typing import Optional
 
 from fastapi import APIRouter, Depends, Query
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from ..database import get_db
+from ..models.task import Task, TaskStatus
+from ..models.user import User
+from ..models.category import Category
 from ..services.nearby import find_nearby
 
 router = APIRouter()
@@ -92,3 +96,47 @@ def discover_offers_map(
     """Public offer map discovery with coarse coordinates only."""
     items = find_nearby(db, lat, lng, min(radius_km, 10), tipo="oferta", category_id=category_id)
     return _public_map_items(items)
+
+
+@router.get("/directory")
+def discover_directory(
+    municipio: str = Query(..., min_length=2, max_length=100),
+    tipo: str = Query("oferta", pattern="^(oferta|necesidad)$"),
+    category_id: Optional[int] = None,
+    db: Session = Depends(get_db),
+):
+    """Public discovery by municipality for visitors who do not share GPS.
+
+    Only public task information is returned. User contact data and exact
+    coordinates are deliberately excluded.
+    """
+    query = (
+        db.query(Task, Category.nombre.label("categoria_nombre"))
+        .join(User, User.id == Task.cliente_id)
+        .outerjoin(Category, Category.id == Task.categoria_id)
+        .filter(
+            Task.estado == TaskStatus.ACTIVA,
+            Task.tipo == tipo,
+            func.lower(User.municipio) == func.lower(municipio.strip()),
+        )
+    )
+    if category_id:
+        query = query.filter(Task.categoria_id == category_id)
+
+    rows = query.order_by(Task.destacada.desc(), Task.created_at.desc()).limit(50).all()
+    return [
+        {
+            "id": task.id,
+            "titulo": task.titulo,
+            "descripcion": task.descripcion,
+            "precio": task.precio,
+            "categoria_id": task.categoria_id,
+            "categoria_nombre": categoria_nombre,
+            "estado": task.estado.value,
+            "tipo": task.tipo,
+            "destacada": bool(task.destacada),
+            "municipio": municipio.strip(),
+            "created_at": task.created_at,
+        }
+        for task, categoria_nombre in rows
+    ]
