@@ -29,6 +29,21 @@ def _public_items(items: list[dict]) -> list[dict]:
     return safe
 
 
+def _public_map_items(items: list[dict]) -> list[dict]:
+    """Public map payload with deliberately coarse coordinates.
+
+    Exact publication coordinates are never exposed to visitors. Two decimal
+    places gives an approximate map position while preserving the privacy
+    boundary used by the normal public discovery response.
+    """
+    safe = _public_items(items)
+    for source, target in zip(items, safe):
+        if source.get("lat") is not None and source.get("lng") is not None:
+            target["lat"] = round(float(source["lat"]), 2)
+            target["lng"] = round(float(source["lng"]), 2)
+    return safe
+
+
 @router.get("/tasks")
 def discover_tasks(
     lat: float = Query(...),
@@ -39,6 +54,19 @@ def discover_tasks(
 ):
     items = find_nearby(db, lat, lng, min(radius_km, 10), tipo="necesidad", category_id=category_id)
     return _public_items(items)
+
+
+@router.get("/tasks/map")
+def discover_tasks_map(
+    lat: float = Query(...),
+    lng: float = Query(...),
+    radius_km: float = Query(5.0, ge=0.1, le=10),
+    category_id: Optional[int] = None,
+    db: Session = Depends(get_db),
+):
+    """Public map discovery with coarse task coordinates only."""
+    items = find_nearby(db, lat, lng, min(radius_km, 10), tipo="necesidad", category_id=category_id)
+    return _public_map_items(items)
 
 
 @router.get("/offers")
