@@ -41,17 +41,24 @@ function applyPendingCategorySearch() {
     sessionStorage.removeItem('heroSelectedCategoriaNombre');
 
     offersTab.click();
-    // El click puede cambiar de panel de forma asíncrona; disparar change
-    // garantiza que el filtro seleccionado sea realmente aplicado.
     select.dispatchEvent(new Event('change', { bubbles: true }));
     return true;
 }
 
 function ensureAuthenticatedSearch() {
-    if (!document.getElementById('dashboardCliente')) return null;
-    if (document.getElementById('heroSearchInputAuth')) return document.getElementById('heroSearchInputAuth');
+    const dashboard = document.getElementById('dashboardCliente') || document.getElementById('dashboardTrabajador');
+    if (!dashboard) return null;
 
-    const dashboard = document.getElementById('dashboardCliente');
+    const existing = document.getElementById('heroSearchInputAuth');
+    if (existing) {
+        const wrapper = existing.closest('.hero-search--dashboard');
+        const tabs = dashboard.querySelector('.sub-tabs');
+        if (wrapper && tabs && wrapper.parentNode !== dashboard) {
+            tabs.parentNode.insertBefore(wrapper, tabs);
+        }
+        return existing;
+    }
+
     const tabs = dashboard.querySelector('.sub-tabs');
     if (!tabs) return null;
 
@@ -72,11 +79,6 @@ async function showPublicCategoryResults(categoryId, categoryName) {
 
     let results;
     try {
-        // El hero responde a "¿Qué necesitas reparar hoy?": el visitante
-        // busca SERVICIOS (ofertas de trabajadores), no necesidades publicadas
-        // por otros clientes. Mantener /discovery/offers aquí evita mostrar
-        // el tipo de publicación equivocado y hace que el flujo coincida con
-        // el dashboard del cliente (filtroCategoriaOfertas).
         results = await apiFetch(`/discovery/offers?lat=${encodeURIComponent(location.lat)}&lng=${encodeURIComponent(location.lng)}&radius_km=10&category_id=${encodeURIComponent(categoryId)}`);
     } catch (err) {
         notify(`No pudimos buscar servicios de ${categoryName}: ${err.message}`, 'error');
@@ -188,6 +190,11 @@ function bindSearch(input, resultsBox) {
                 if (token) {
                     try {
                         await apiFetch('/users/profile');
+                        const clientModeBtn = document.querySelector('.mode-switch__btn[data-modo="cliente"]');
+                        if (clientModeBtn && !clientModeBtn.classList.contains('is-active')) {
+                            clientModeBtn.click();
+                            await new Promise(resolve => setTimeout(resolve, 50));
+                        }
                         showDashboardCliente();
                         pendingSearchApplied = false;
                         if (!applyPendingCategorySearch()) {
@@ -202,8 +209,6 @@ function bindSearch(input, resultsBox) {
                     }
                 }
 
-                // Un visitante puede explorar primero. El login sólo aparece
-                // cuando intenta contactar, no al seleccionar el oficio.
                 await showPublicCategoryResults(categoryId, categoryName);
             });
         });
@@ -261,10 +266,5 @@ export async function initLandingSearch() {
             setTimeout(applyPendingCategorySearch, 1000);
         }
     });
-    observer.observe(document.getElementById('views') || document.body, {
-        subtree: true,
-        childList: true,
-        attributes: true,
-        attributeFilter: ['class']
-    });
+    observer.observe(document.body, { childList: true, subtree: true });
 }
