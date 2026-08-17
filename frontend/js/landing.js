@@ -72,7 +72,12 @@ async function showPublicCategoryResults(categoryId, categoryName) {
 
     let results;
     try {
-        results = await apiFetch(`/discovery/tasks?lat=${encodeURIComponent(location.lat)}&lng=${encodeURIComponent(location.lng)}&radius_km=10&category_id=${encodeURIComponent(categoryId)}`);
+        // El hero responde a "¿Qué necesitas reparar hoy?": el visitante
+        // busca SERVICIOS (ofertas de trabajadores), no necesidades publicadas
+        // por otros clientes. Mantener /discovery/offers aquí evita mostrar
+        // el tipo de publicación equivocado y hace que el flujo coincida con
+        // el dashboard del cliente (filtroCategoriaOfertas).
+        results = await apiFetch(`/discovery/offers?lat=${encodeURIComponent(location.lat)}&lng=${encodeURIComponent(location.lng)}&radius_km=10&category_id=${encodeURIComponent(categoryId)}`);
     } catch (err) {
         notify(`No pudimos buscar servicios de ${categoryName}: ${err.message}`, 'error');
         return;
@@ -92,8 +97,8 @@ async function showPublicCategoryResults(categoryId, categoryName) {
     const subtitle = document.createElement('p');
     subtitle.className = 'modal-message';
     subtitle.textContent = items.length
-        ? `${items.length} resultado${items.length === 1 ? '' : 's'} encontrado${items.length === 1 ? '' : 's'}. Inicia sesión para contactar o postularte.`
-        : 'No encontramos tareas de este oficio dentro del radio de búsqueda.';
+        ? `${items.length} servicio${items.length === 1 ? '' : 's'} encontrado${items.length === 1 ? '' : 's'}. Inicia sesión para contactar al trabajador.`
+        : 'No encontramos servicios de este oficio dentro del radio de búsqueda.';
     modal.appendChild(subtitle);
 
     const list = document.createElement('div');
