@@ -42,7 +42,7 @@ async function loadMapItems(lat, lng) {
     const authenticated = !!localStorage.getItem('token');
     let endpoint;
     if (!authenticated) {
-        endpoint = mode === 'trabajador' ? '/discovery/tasks/map' : '/discovery/offers';
+        endpoint = mode === 'trabajador' ? '/discovery/tasks/map' : '/discovery/offers/map';
     } else {
         endpoint = mode === 'trabajador' ? '/tasks/nearby' : '/tasks/ofertas/nearby';
     }
@@ -119,9 +119,7 @@ function mountMapInActivePanel() {
     const panel = document.getElementById(panelId);
     if (!panel) return;
 
-    const anchorId = mode === 'trabajador' ? 'toggleMapBtn' : 'toggleMapBtnClient';
-    const anchor = document.getElementById(anchorId);
-    if (anchor && mapDiv.parentElement !== panel) {
+    if (mapDiv.parentElement !== panel) {
         panel.appendChild(mapDiv);
     }
 }
