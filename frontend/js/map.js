@@ -1,4 +1,5 @@
 import { apiFetch, notify } from './core.js';
+import { getLocationWithFallback } from './location.js';
 
 let map = null;
 let marker = null;
@@ -55,37 +56,18 @@ async function loadMapTasks(lat, lng) {
     }
 }
 
-async function getCurrentPosition() {
-    return new Promise((resolve, reject) => {
-        if (!navigator.geolocation) {
-            const error = new Error('Tu navegador no ofrece geolocalización.');
-            error.code = 2;
-            reject(error);
-            return;
-        }
-        navigator.geolocation.getCurrentPosition(resolve, reject, {
-            enableHighAccuracy: true,
-            timeout: 10000,
-            maximumAge: 60000
-        });
-    });
-}
+async function refreshMapTasks() {
+    const location = await getLocationWithFallback();
+    if (!location) return;
 
-function locationHelp(err) {
-    const code = err?.code;
-    if (code === 1) {
-        notify('Ubicación bloqueada. Revisa el icono de ubicación/candado junto a la dirección del navegador, permite la ubicación para ServiCuba y vuelve a pulsar el mapa. Si la bloqueaste permanentemente, cambia el permiso desde la configuración del sitio del navegador.', 'error');
-        return;
-    }
-    if (code === 2) {
-        notify('No pudimos determinar tu ubicación. Comprueba que la ubicación/GPS esté activa en tu dispositivo y vuelve a intentarlo.', 'error');
-        return;
-    }
-    if (code === 3) {
-        notify('La ubicación tardó demasiado. Activa el GPS/ubicación y vuelve a intentarlo.', 'error');
-        return;
-    }
-    notify(`No se pudo obtener tu ubicación: ${err?.message || 'error desconocido'}.`, 'error');
+    map.setView([location.lat, location.lng], 13);
+    if (marker) map.removeLayer(marker);
+    marker = L.marker([location.lat, location.lng])
+        .addTo(map)
+        .bindPopup(location.source === 'manual' ? 'Ubicación seleccionada' : 'Tu ubicación');
+
+    const count = await loadMapTasks(location.lat, location.lng);
+    if (!count) notify('No hay tareas activas dentro del radio seleccionado.', 'info');
 }
 
 export function initMap() {
@@ -105,36 +87,23 @@ export function initMap() {
         }
         setTimeout(() => map.invalidateSize(), 0);
 
+        // La vista del mapa sigue siendo una función autenticada porque
+        // /tasks/nearby protege datos operativos. Lo que cambia aquí es que
+        // la ubicación ya no deja al usuario atrapado en un toast: si el
+        // navegador la bloquea, se ofrecen reintento, última ubicación o
+        // coordenadas manuales.
         if (!localStorage.getItem('token')) {
-            notify('Inicia sesión para ver las tareas en el mapa.', 'error');
+            notify('Inicia sesión para cargar las tareas del mapa.', 'error');
             return;
         }
 
-        try {
-            const pos = await getCurrentPosition();
-            const lat = pos.coords.latitude;
-            const lng = pos.coords.longitude;
-            map.setView([lat, lng], 13);
-
-            if (marker) map.removeLayer(marker);
-            marker = L.marker([lat, lng]).addTo(map).bindPopup('Tu ubicación');
-
-            const count = await loadMapTasks(lat, lng);
-            if (!count) notify('No hay tareas activas dentro del radio seleccionado.', 'info');
-        } catch (err) {
-            locationHelp(err);
-        }
+        await refreshMapTasks();
     });
 
     ['filtroRadio', 'filtroCategoria'].forEach(id => {
         document.getElementById(id)?.addEventListener('change', async () => {
             if (!map || document.getElementById('map')?.classList.contains('hidden')) return;
-            try {
-                const pos = await getCurrentPosition();
-                await loadMapTasks(pos.coords.latitude, pos.coords.longitude);
-            } catch (err) {
-                locationHelp(err);
-            }
+            await refreshMapTasks();
         });
     });
 }
