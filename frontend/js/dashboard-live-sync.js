@@ -37,71 +37,91 @@ function escapeHtml(value) {
 
 function statusLabel(status) {
     const labels = {
-        pendiente: 'Pendiente',
-        aceptada: 'Aceptada',
-        asignada: 'Asignada',
-        activa: 'Activa',
-        en_proceso: 'En proceso',
-        completada: 'Completada',
-        cancelada: 'Cancelada',
-        rechazada: 'Rechazada'
+        pendiente: 'Pendiente', aceptada: 'Aceptada', asignada: 'Asignada', activa: 'Activa',
+        en_proceso: 'En proceso', completada: 'Completada', cancelada: 'Cancelada', rechazada: 'Rechazada'
     };
     return labels[String(status || '').toLowerCase()] || String(status || 'Actualización');
+}
+
+function ensureKpiGrid(shell) {
+    let grid = shell.querySelector('.dashboard-live__kpis');
+    if (grid) return grid;
+    grid = document.createElement('div');
+    grid.className = 'dashboard-live__kpis';
+    grid.innerHTML = `
+        <article class="dashboard-live__kpi"><span>Activas</span><strong data-dashboard-kpi="primario">0</strong><small data-dashboard-kpi-hint="primario">en tu espacio</small></article>
+        <article class="dashboard-live__kpi"><span>En espera</span><strong data-dashboard-kpi="secundario">0</strong><small data-dashboard-kpi-hint="secundario">pendientes</small></article>
+        <article class="dashboard-live__kpi"><span>Completadas</span><strong data-dashboard-kpi="completadas">0</strong><small>historial</small></article>
+        <article class="dashboard-live__kpi"><span>Mensajes</span><strong data-dashboard-kpi="mensajes_no_leidos">0</strong><small>sin leer</small></article>
+    `;
+    const activity = shell.querySelector('#dashboardLiveActivity');
+    shell.insertBefore(grid, activity || null);
+    return grid;
 }
 
 function renderWorkspaceState(state) {
     latestState = state;
     const mode = isClienteMode() ? 'cliente' : 'trabajador';
-    const data = mode === 'cliente' ? state.cliente : state.trabajador;
+    const data = mode === 'cliente' ? (state.cliente || {}) : (state.trabajador || {});
     const global = state.global || {};
+    const shell = document.querySelector(`#${mode === 'cliente' ? 'dashboardCliente' : 'dashboardTrabajador'} .dashboard-live`);
+    if (!shell) return;
+    const grid = ensureKpiGrid(shell);
 
-    document.querySelectorAll('[data-dashboard-kpi]').forEach(el => {
-        const key = el.dataset.dashboardKpi;
-        const value = key === 'mensajes_no_leidos' ? global[key] : data?.[key];
-        if (value !== undefined) el.textContent = String(value);
-    });
-
-    const stat1 = document.getElementById('dashboardStat1');
-    const stat1Label = document.getElementById('dashboardStat1Label');
-    const context = document.getElementById('dashboardLiveContext');
-    const activity = document.getElementById('dashboardLiveActivity');
-    const stat3 = document.getElementById('dashboardStat3');
-    const stat3Hint = document.getElementById('dashboardStat3Hint');
-
-    if (stat1 && stat1Label && context) {
-        if (mode === 'cliente') {
-            stat1Label.textContent = 'Tareas activas';
-            stat1.textContent = String(data?.tareas_activas ?? 0);
-            context.textContent = (data?.solicitudes_recibidas ?? 0) > 0
-                ? `${data.solicitudes_recibidas} solicitud${data.solicitudes_recibidas === 1 ? '' : 'es'} pendiente${data.solicitudes_recibidas === 1 ? '' : 's'}.`
-                : 'Tu espacio está actualizado.';
-            if (stat3) stat3.textContent = String(global.mensajes_no_leidos ?? 0);
-            if (stat3Hint) stat3Hint.textContent = 'mensajes sin leer';
-        } else {
-            stat1Label.textContent = 'Postulaciones pendientes';
-            stat1.textContent = String(data?.postulaciones_pendientes ?? 0);
-            context.textContent = (data?.trabajos_aceptados ?? 0) > 0
-                ? `${data.trabajos_aceptados} trabajo${data.trabajos_aceptados === 1 ? '' : 's'} aceptado${data.trabajos_aceptados === 1 ? '' : 's'}.`
-                : 'Tu espacio de trabajo está actualizado.';
-            if (stat3) stat3.textContent = String(data?.servicios_activos ?? 0);
-            if (stat3Hint) stat3Hint.textContent = 'servicios activos';
-        }
+    let cards;
+    if (mode === 'cliente') {
+        cards = {
+            primario: data.tareas_activas ?? 0,
+            secundario: data.solicitudes_recibidas ?? 0,
+            completadas: data.tareas_completadas ?? 0,
+            mensajes_no_leidos: global.mensajes_no_leidos ?? 0
+        };
+        grid.querySelector('[data-dashboard-kpi="primario"]')?.closest('article')?.querySelector('span').replaceChildren('Tareas activas');
+        grid.querySelector('[data-dashboard-kpi="secundario"]')?.closest('article')?.querySelector('span').replaceChildren('Solicitudes');
+        grid.querySelector('[data-dashboard-kpi="completadas"]')?.closest('article')?.querySelector('span').replaceChildren('Completadas');
+        grid.querySelector('[data-dashboard-kpi-hint="primario"]')?.replaceChildren('que requieren atención');
+        grid.querySelector('[data-dashboard-kpi-hint="secundario"]')?.replaceChildren(cards.secundario ? 'esperando respuesta' : 'ninguna pendiente');
+    } else {
+        cards = {
+            primario: data.trabajos_aceptados ?? 0,
+            secundario: data.postulaciones_pendientes ?? 0,
+            completadas: data.servicios_activos ?? 0,
+            mensajes_no_leidos: global.mensajes_no_leidos ?? 0
+        };
+        grid.querySelector('[data-dashboard-kpi="primario"]')?.closest('article')?.querySelector('span').replaceChildren('Trabajos aceptados');
+        grid.querySelector('[data-dashboard-kpi="secundario"]')?.closest('article')?.querySelector('span').replaceChildren('Postulaciones');
+        grid.querySelector('[data-dashboard-kpi="completadas"]')?.closest('article')?.querySelector('span').replaceChildren('Servicios activos');
+        grid.querySelector('[data-dashboard-kpi-hint="primario"]')?.replaceChildren(cards.primario ? 'requieren seguimiento' : 'sin trabajos activos');
+        grid.querySelector('[data-dashboard-kpi-hint="secundario"]')?.replaceChildren(cards.secundario ? 'pendientes de respuesta' : 'ninguna pendiente');
     }
 
+    Object.entries(cards).forEach(([key, value]) => {
+        const el = grid.querySelector(`[data-dashboard-kpi="${key}"]`);
+        if (el) el.textContent = String(value);
+    });
+
+    const context = shell.querySelector('#dashboardLiveContext');
+    const stat2 = shell.querySelector('#dashboardStat2');
+    const stat3 = shell.querySelector('#dashboardStat3');
+    const stat3Hint = shell.querySelector('#dashboardStat3Hint');
+    if (context) context.textContent = mode === 'cliente'
+        ? (cards.secundario ? `${cards.secundario} solicitud${cards.secundario === 1 ? '' : 'es'} pendiente${cards.secundario === 1 ? '' : 's'}.` : 'Todo está actualizado. Puedes buscar un servicio o crear una tarea.')
+        : (cards.secundario ? `${cards.secundario} postulación${cards.secundario === 1 ? '' : 'es'} esperando respuesta.` : 'Tu espacio de trabajo está actualizado.');
+    if (stat2) stat2.textContent = new Date().toLocaleTimeString('es-CU', { hour: '2-digit', minute: '2-digit' });
+    if (stat3) stat3.textContent = cards.mensajes_no_leidos > 0 ? String(cards.mensajes_no_leidos) : 'OK';
+    if (stat3Hint) stat3Hint.textContent = cards.mensajes_no_leidos > 0 ? 'mensajes sin leer' : 'sin alertas';
+
+    const activity = shell.querySelector('#dashboardLiveActivity');
     if (activity) {
-        const rows = Array.isArray(state.activity) ? state.activity.slice(0, 4) : [];
-        activity.innerHTML = rows.length
-            ? rows.map(item => `
-                <div class="dashboard-live__activity-item">
-                    <div class="dashboard-live__activity-icon">●</div>
-                    <div>
-                        <strong>${escapeHtml(item.type === 'application_received' ? 'Nueva postulación' : 'Postulación enviada')}</strong>
-                        <span>${escapeHtml(item.title)} · ${escapeHtml(statusLabel(item.status))} · ${escapeHtml(formatRelativeTime(item.created_at))}</span>
-                    </div>
-                </div>`).join('')
-            : `<div class="dashboard-live__activity-item">
+        const rows = Array.isArray(state.activity) ? state.activity.slice(0, 5) : [];
+        activity.innerHTML = rows.length ? rows.map(item => `
+            <div class="dashboard-live__activity-item">
+                <div class="dashboard-live__activity-icon">●</div>
+                <div><strong>${escapeHtml(item.type === 'application_received' ? 'Nueva postulación' : 'Postulación enviada')}</strong><span>${escapeHtml(item.title)} · ${escapeHtml(statusLabel(item.status))} · ${escapeHtml(formatRelativeTime(item.created_at))}</span></div>
+            </div>`).join('') : `
+            <div class="dashboard-live__activity-item">
                 <div class="dashboard-live__activity-icon dashboard-live__activity-icon--muted">⌁</div>
-                <div><strong>Sin actividad reciente</strong><span>Las nuevas acciones aparecerán aquí.</span></div>
+                <div><strong>Sin actividad reciente</strong><span>Las nuevas acciones aparecerán aquí automáticamente.</span></div>
             </div>`;
     }
 }
@@ -132,14 +152,9 @@ export async function syncDashboardData() {
     const buttons = document.querySelectorAll('.dashboard-live__refresh');
     buttons.forEach(button => { button.classList.add('is-loading'); button.setAttribute('aria-busy', 'true'); });
     try {
-        const [stateResult] = await Promise.all([
-            apiFetch('/dashboard/state'),
-            loadCurrentWorkspace()
-        ]);
+        const [stateResult] = await Promise.all([apiFetch('/dashboard/state'), loadCurrentWorkspace()]);
         renderWorkspaceState(stateResult);
-        document.dispatchEvent(new CustomEvent('servicuba:data-refreshed', {
-            detail: { at: Date.now(), mode: isClienteMode() ? 'cliente' : 'trabajador', state: stateResult }
-        }));
+        document.dispatchEvent(new CustomEvent('servicuba:data-refreshed', { detail: { at: Date.now(), mode: isClienteMode() ? 'cliente' : 'trabajador', state: stateResult } }));
     } catch (err) {
         document.dispatchEvent(new CustomEvent('servicuba:data-refresh-error', { detail: { error: err } }));
         if (err?.message) notify(`No se pudo actualizar el espacio de trabajo: ${err.message}`, 'error');
@@ -158,24 +173,17 @@ export function stopDashboardDataSync() {
     if (syncTimer !== null) { window.clearInterval(syncTimer); syncTimer = null; }
 }
 
-export function getLatestDashboardState() {
-    return latestState;
-}
+export function getLatestDashboardState() { return latestState; }
 
 function handleVisibility() {
     if (document.hidden) { stopDashboardDataSync(); return; }
-    if (isDashboardVisible() && localStorage.getItem('token')) {
-        syncDashboardData().catch(() => {});
-        startDashboardDataSync();
-    }
+    if (isDashboardVisible() && localStorage.getItem('token')) { syncDashboardData().catch(() => {}); startDashboardDataSync(); }
 }
 
 function handleModeChange(event) {
     const button = event.target.closest('.mode-switch__btn');
     if (!button || button.classList.contains('is-active')) return;
-    window.setTimeout(() => {
-        if (isDashboardVisible() && localStorage.getItem('token')) syncDashboardData().catch(() => {});
-    }, 150);
+    window.setTimeout(() => { if (isDashboardVisible() && localStorage.getItem('token')) syncDashboardData().catch(() => {}); }, 150);
 }
 
 export function initDashboardLiveSync() {
@@ -183,7 +191,6 @@ export function initDashboardLiveSync() {
     initialized = true;
     document.addEventListener('visibilitychange', handleVisibility);
     document.getElementById('modoSwitch')?.addEventListener('click', handleModeChange);
-
     const root = document.getElementById('views') || document.body;
     const observer = new MutationObserver(() => {
         if (isDashboardVisible() && localStorage.getItem('token')) {
@@ -193,16 +200,8 @@ export function initDashboardLiveSync() {
         }
     });
     observer.observe(root, { childList: true, subtree: true });
-
-    if (isDashboardVisible() && localStorage.getItem('token')) {
-        syncDashboardData().catch(() => {});
-        startDashboardDataSync();
-        observer.disconnect();
-    }
+    if (isDashboardVisible() && localStorage.getItem('token')) { syncDashboardData().catch(() => {}); startDashboardDataSync(); observer.disconnect(); }
 }
 
-if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', initDashboardLiveSync, { once: true });
-} else {
-    initDashboardLiveSync();
-}
+if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', initDashboardLiveSync, { once: true });
+else initDashboardLiveSync();
