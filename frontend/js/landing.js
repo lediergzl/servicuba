@@ -26,13 +26,29 @@ function timeAgo(iso) {
     return `hace ${Math.floor(hrs / 24)} d`;
 }
 
+function freshnessMinutes(iso) {
+    if (!iso) return Infinity;
+    const timestamp = new Date(iso).getTime();
+    if (!Number.isFinite(timestamp)) return Infinity;
+    return Math.floor((Date.now() - timestamp) / 60000);
+}
+
+function ensureLiveFeedStyles() {
+    if (document.getElementById('landing-live-feed-fix-style')) return;
+    const style = document.createElement('style');
+    style.id = 'landing-live-feed-fix-style';
+    style.textContent = `.live-feed__item{display:flex;align-items:baseline;gap:8px;padding:9px 0;border-bottom:1px solid var(--line);font-size:13px}.live-feed__text{flex:1;min-width:0;color:var(--ink);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.live-feed__time{flex-shrink:0;font-size:11px;color:var(--muted)}.live-feed__icon{flex-shrink:0;font-size:14px}.live-feed__label{display:flex;align-items:center;gap:7px;font-size:12.5px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.04em;margin:0 0 8px}.live-dot{width:7px;height:7px;flex:0 0 7px;border-radius:50%;background:var(--success);animation:live-pulse 1.8s ease-in-out infinite}@keyframes live-pulse{0%,100%{opacity:1}50%{opacity:.35}}`;
+    document.head.appendChild(style);
+}
+
 function ensureLiveFeed() {
+    ensureLiveFeedStyles();
     const landing = document.getElementById('landing');
     if (!landing || document.getElementById('landingLiveFeed')) return;
     const feed = document.createElement('section');
     feed.id = 'landingLiveFeed';
     feed.className = 'live-feed hidden';
-    feed.innerHTML = '<p class="live-feed__label"><span class="live-dot"></span>Esto está pasando ahora mismo</p><div id="liveFeedList" class="live-feed__list"></div>';
+    feed.innerHTML = '<p class="live-feed__label" id="liveFeedLabel"><span class="live-dot"></span>Actividad reciente en ServiCuba</p><div id="liveFeedList" class="live-feed__list"></div>';
     const search = landing.querySelector('.hero-search');
     const actions = landing.querySelector('.stack-md');
     if (search) search.after(feed); else if (actions) actions.before(feed); else landing.appendChild(feed);
@@ -42,13 +58,32 @@ function renderLiveFeed(items) {
     ensureLiveFeed();
     const container = document.getElementById('liveFeedList');
     const wrapper = document.getElementById('landingLiveFeed');
+    const label = document.getElementById('liveFeedLabel');
     if (!container || !wrapper) return;
-    if (!Array.isArray(items) || !items.length) { wrapper.classList.add('hidden'); return; }
+
+    const safeItems = Array.isArray(items) ? items : [];
+    const mostRecentMins = safeItems.length ? freshnessMinutes(safeItems[0].created_at) : Infinity;
+    const isTrulyLive = safeItems.length >= 2 && mostRecentMins < 60 * 24 * 3;
+    if (!isTrulyLive) {
+        wrapper.classList.add('hidden');
+        return;
+    }
+
     wrapper.classList.remove('hidden');
-    container.innerHTML = items.slice(0, 5).map(item => {
+    if (label) {
+        label.innerHTML = mostRecentMins < 60
+            ? '<span class="live-dot"></span>Esto está pasando ahora mismo'
+            : '<span class="live-dot"></span>Actividad reciente en ServiCuba';
+    }
+
+    container.innerHTML = safeItems.slice(0, 5).map(item => {
         const verbo = item.tipo === 'oferta' ? 'Ofrece' : 'Busca';
-        const icon = item.categoria_icono ? escapeHtml(item.categoria_icono) : '';
-        return `<div class="live-feed__item"><span class="live-feed__icon">${icon}</span><span class="live-feed__text"><strong>${verbo}:</strong> ${escapeHtml(item.titulo || 'Nueva publicación')}${item.municipio ? ` · ${escapeHtml(item.municipio)}` : ''}</span><span class="live-feed__time mono">${timeAgo(item.created_at)}</span></div>`;
+        const icono = item.categoria_icono ? escapeHtml(item.categoria_icono) : '';
+        const titulo = escapeHtml(item.titulo || 'Nueva publicación');
+        const municipio = item.municipio ? escapeHtml(item.municipio) : '';
+        const textParts = [titulo];
+        if (municipio) textParts.push(municipio);
+        return `<div class="live-feed__item"><span class="live-feed__icon">${icono}</span><span class="live-feed__text"><strong>${verbo}:</strong> ${textParts.join(' · ')}</span><span class="live-feed__time mono">${timeAgo(item.created_at)}</span></div>`;
     }).join('');
 }
 
