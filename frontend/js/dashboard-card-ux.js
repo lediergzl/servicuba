@@ -1,4 +1,5 @@
 import './dashboard-visual-polish.js';
+import './landing-public-experience.js';
 
 const STYLE_ID = 'servicuba-dashboard-card-ux';
 
