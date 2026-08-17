@@ -25,7 +25,7 @@ async function loadMapTasks(lat, lng) {
     if (category) params.set('category_id', category);
 
     const authenticated = !!localStorage.getItem('token');
-    const endpoint = authenticated ? '/tasks/nearby' : '/discovery/tasks';
+    const endpoint = authenticated ? '/tasks/nearby' : '/discovery/tasks/map';
 
     try {
         const tasks = await apiFetch(`${endpoint}?${params.toString()}`);
@@ -42,7 +42,7 @@ async function loadMapTasks(lat, lng) {
                 .bindPopup(
                     `<strong>${t.destacada ? '★ ' : ''}${escapeHtmlLocal(t.titulo)}</strong><br>`
                     + `$${escapeHtmlLocal(String(t.precio ?? 0))} · ${escapeHtmlLocal(String(t.distancia_km ?? ''))} km`
-                    + (!authenticated ? '<br><small>Inicia sesión para contactar</small>' : '')
+                    + (!authenticated ? '<br><small>Ubicación aproximada · inicia sesión para contactar</small>' : '')
                 );
             taskMarkers.push(taskMarker);
         });
