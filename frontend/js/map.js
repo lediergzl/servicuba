@@ -42,9 +42,9 @@ async function loadMapItems(lat, lng) {
     const authenticated = !!localStorage.getItem('token');
     let endpoint;
     if (!authenticated) {
-        endpoint = mode === 'trabajador' ? '/discovery/tasks/map' : '/discovery/offers/map';
+        endpoint = mode === 'trabajador' ? '/api/discovery/tasks/map' : '/api/discovery/offers/map';
     } else {
-        endpoint = mode === 'trabajador' ? '/tasks/nearby' : '/tasks/ofertas/nearby';
+        endpoint = mode === 'trabajador' ? '/api/tasks/nearby' : '/api/tasks/ofertas/nearby';
     }
 
     try {
