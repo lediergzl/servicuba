@@ -20,13 +20,21 @@ function clearTaskMarkers() {
 
 function getMapMode() {
     const mode = document.querySelector('.mode-switch__btn.is-active')?.dataset.modo;
-    if (mode === 'trabajador') return 'trabajador';
-    return 'cliente';
+    return mode === 'trabajador' ? 'trabajador' : 'cliente';
+}
+
+function getMapFilters() {
+    const mode = getMapMode();
+    const radiusId = mode === 'trabajador' ? 'filtroRadio' : 'filtroRadioOfertas';
+    const categoryId = mode === 'trabajador' ? 'filtroCategoria' : 'filtroCategoriaOfertas';
+    return {
+        radius: document.getElementById(radiusId)?.value || 5,
+        category: document.getElementById(categoryId)?.value || ''
+    };
 }
 
 async function loadMapItems(lat, lng) {
-    const radius = document.getElementById('filtroRadio')?.value || 5;
-    const category = document.getElementById('filtroCategoria')?.value || '';
+    const { radius, category } = getMapFilters();
     const mode = getMapMode();
     const params = new URLSearchParams({ lat: String(lat), lng: String(lng), radius_km: String(radius) });
     if (category) params.set('category_id', category);
@@ -77,7 +85,7 @@ async function loadMapItems(lat, lng) {
 
 async function refreshMapTasks() {
     const location = await getLocationWithFallback();
-    if (!location) return;
+    if (!location || !map) return;
 
     map.setView([location.lat, location.lng], 13);
     if (marker) map.removeLayer(marker);
@@ -89,26 +97,46 @@ async function refreshMapTasks() {
     if (!count) notify('No hay resultados dentro del radio seleccionado.', 'info');
 }
 
+function ensureClientMapEntry() {
+    const panel = document.getElementById('ofertasCercanasPanel');
+    const mapDiv = document.getElementById('map');
+    if (!panel || !mapDiv || document.getElementById('toggleMapBtnClient')) return;
+
+    const button = document.createElement('button');
+    button.id = 'toggleMapBtnClient';
+    button.type = 'button';
+    button.className = 'btn btn-secondary btn-block mt-md';
+    button.innerHTML = '<svg class="icon" viewBox="0 0 24 24"><path d="M3 6l6-2 6 2 6-2v14l-6 2-6-2-6 2V6Z"/><path d="M9 4v14M15 6v14"/></svg> Ver ofertas en mapa';
+    panel.appendChild(button);
+    panel.appendChild(mapDiv);
+
+    button.addEventListener('click', () => toggleMap());
+}
+
+function toggleMap() {
+    const mapDiv = document.getElementById('map');
+    if (!mapDiv) return;
+
+    const opening = mapDiv.classList.contains('hidden');
+    mapDiv.classList.toggle('hidden', !opening);
+    if (!opening) return;
+
+    if (!map) {
+        map = L.map('map').setView([22.145, -80.450], 13);
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            attribution: '© OpenStreetMap'
+        }).addTo(map);
+    }
+    setTimeout(() => map.invalidateSize(), 0);
+    refreshMapTasks();
+}
+
 export function initMap() {
-    document.getElementById('toggleMapBtn')?.addEventListener('click', async () => {
-        const mapDiv = document.getElementById('map');
-        if (!mapDiv) return;
+    ensureClientMapEntry();
 
-        const opening = mapDiv.classList.contains('hidden');
-        mapDiv.classList.toggle('hidden', !opening);
-        if (!opening) return;
+    document.getElementById('toggleMapBtn')?.addEventListener('click', toggleMap);
 
-        if (!map) {
-            map = L.map('map').setView([22.145, -80.450], 13);
-            L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-                attribution: '© OpenStreetMap'
-            }).addTo(map);
-        }
-        setTimeout(() => map.invalidateSize(), 0);
-        await refreshMapTasks();
-    });
-
-    ['filtroRadio', 'filtroCategoria'].forEach(id => {
+    ['filtroRadio', 'filtroCategoria', 'filtroRadioOfertas', 'filtroCategoriaOfertas'].forEach(id => {
         document.getElementById(id)?.addEventListener('change', async () => {
             if (!map || document.getElementById('map')?.classList.contains('hidden')) return;
             await refreshMapTasks();
