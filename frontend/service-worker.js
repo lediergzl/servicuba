@@ -1,25 +1,9 @@
 // Sube este número en CADA deploy que toque archivos de frontend/js o 
-// frontend/css. Antes CACHE_NAME quedaba fijo entre despliegues: como el
-// navegador sólo re-instala el service worker cuando ESTE archivo cambia
-// byte a byte, un deploy que sólo tocara tasks.js/core.js/etc. nunca
-// disparaba 'install' — el navegador seguía sirviendo los JS viejos desde
-// caché indefinidamente, aunque el servidor ya tuviera el código nuevo.
-// v8: se agregó frontend/js/landing.js (buscador instantáneo del hero).
-// v9: fix en tasks.js — la ubicación GPS se pide en paralelo al llenar
-// el formulario de "Nueva tarea"/"Publicar servicio", con reintento sin
-// perder los datos si falla (antes se perdía todo lo escrito).
-// v10: landing.js ahora revisa el token antes de mandar a "Regístrate"
-// (si ya hay sesión, va directo al dashboard) y tasks.js precarga la
-// categoría elegida en el buscador del hero al abrir "Nueva tarea".
-// v11: microinteracciones — transición fade+slide al cambiar de vista y
-// de sub-pestaña (.view / .subtab-panel en style.css), fade-in
-// escalonado de las tarjetas de tarea/oferta al renderizarse (--i por
-// tarjeta, fijado en tasks.js), dropdown del buscador del hero con
-// entrada suave, burbujas de chat con pop de entrada, feedback táctil
-// en bottom-nav y conversation-item. Sólo CSS/JS de frontend, sin
-// cambios de backend. "Mostrar mapa" renombrado a "Ver tareas en mapa"
-// (index.html) para que se entienda qué hace antes de tocarlo.
-const CACHE_VERSION = 'v11';
+// frontend/css. El app shell usa network-first, pero cambiar la versión
+// fuerza además la instalación de un nuevo service worker y elimina caches
+// anteriores, evitando que una PWA instalada conserve una versión vieja.
+// v12: fixes de buscador autenticado, geolocalización y mapa.
+const CACHE_VERSION = 'v12';
 const CACHE_NAME = `servicuba-${CACHE_VERSION}`;
 
 const urlsToCache = [
@@ -62,13 +46,8 @@ self.addEventListener('activate', event => {
   );
 });
 
-// Network-first para el app shell (HTML/JS/CSS/manifest): siempre intenta
-// traer la versión más reciente del servidor primero, y sólo cae al caché
-// si no hay red (modo offline). Esto evita el problema de fondo: con
-// cache-first, un deploy nuevo de tasks.js/core.js/etc. quedaba invisible
-// para cualquiera que ya tuviera la PWA instalada/visitada antes, hasta
-// que ESTE archivo cambiara. Los íconos (que casi nunca cambian) se
-// sirven cache-first para no gastar red en cada carga.
+// Network-first para el app shell: siempre intenta traer la versión más
+// reciente del servidor primero y sólo cae al caché si no hay red.
 const CACHE_FIRST_PATTERNS = [/\/assets\/icons\//];
 
 self.addEventListener('fetch', event => {
@@ -87,8 +66,6 @@ self.addEventListener('fetch', event => {
   event.respondWith(
     fetch(event.request)
       .then(response => {
-        // Guarda una copia fresca en caché para el modo offline, sin
-        // bloquear la respuesta al usuario.
         const copy = response.clone();
         caches.open(CACHE_NAME).then(cache => cache.put(event.request, copy)).catch(() => {});
         return response;
@@ -97,15 +74,11 @@ self.addEventListener('fetch', event => {
   );
 });
 
-// ---------- Web Push ----------
-
 self.addEventListener('push', event => {
   let data = { title: 'ServiCuba', body: 'Tienes una notificación nueva.', url: '/' };
   try {
     if (event.data) data = { ...data, ...event.data.json() };
-  } catch (e) {
-    // payload no-JSON, se usan los valores por defecto
-  }
+  } catch (e) {}
 
   event.waitUntil(
     self.registration.showNotification(data.title, {
