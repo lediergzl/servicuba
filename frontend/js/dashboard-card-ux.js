@@ -1,3 +1,5 @@
+import './dashboard-visual-polish.js';
+
 const STYLE_ID = 'servicuba-dashboard-card-ux';
 
 function injectStyles() {
