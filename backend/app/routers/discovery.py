@@ -79,3 +79,16 @@ def discover_offers(
 ):
     items = find_nearby(db, lat, lng, min(radius_km, 10), tipo="oferta", category_id=category_id)
     return _public_items(items)
+
+
+@router.get("/offers/map")
+def discover_offers_map(
+    lat: float = Query(...),
+    lng: float = Query(...),
+    radius_km: float = Query(5.0, ge=0.1, le=10),
+    category_id: Optional[int] = None,
+    db: Session = Depends(get_db),
+):
+    """Public offer map discovery with coarse coordinates only."""
+    items = find_nearby(db, lat, lng, min(radius_km, 10), tipo="oferta", category_id=category_id)
+    return _public_map_items(items)
