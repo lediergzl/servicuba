@@ -3,6 +3,7 @@ import { loadNearbyTasks, loadNearbyOfertas } from './tasks.js';
 import './dashboard-card-ux.js';
 import './dashboard-presence.js';
 import './dashboard-messaging-sync.js';
+import './dashboard-action-feedback.js';
 
 let syncTimer = null;
 let syncInFlight = false;
