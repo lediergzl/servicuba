@@ -153,6 +153,18 @@ export function initMap() {
             await refreshMapTasks();
         });
     });
+
+    document.getElementById('modoSwitch')?.addEventListener('click', event => {
+        const button = event.target.closest('.mode-switch__btn');
+        if (!button || button.classList.contains('is-active')) return;
+        setTimeout(async () => {
+            const mapDiv = document.getElementById('map');
+            if (!map || !mapDiv || mapDiv.classList.contains('hidden')) return;
+            mountMapInActivePanel();
+            map.invalidateSize();
+            await refreshMapTasks();
+        }, 0);
+    });
 }
 
 function escapeHtmlLocal(str) {
