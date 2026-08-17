@@ -47,7 +47,8 @@ def test_reconciliation_keeps_refunds_in_gross_and_reduces_net():
     result = payment_reconciliation(db=db, _admin=SimpleNamespace(id="admin"))
 
     assert result["pagos_considerados"] == 4
-    assert result["resumen"] == {
+    assert result["resumen"]["USD"] == {
+        "cantidad": 4,
         "confirmado_bruto": "15.00",
         "reembolsado": "5.00",
         "neto": "10.00",
@@ -71,9 +72,9 @@ def test_reconciliation_breaks_down_by_type_and_currency():
 
     result = payment_reconciliation(db=db, _admin=SimpleNamespace(id="admin"))
 
-    assert result["por_tipo"]["suscripcion_trabajador"]["confirmado_bruto"] == "14.00"
-    assert result["por_tipo"]["suscripcion_trabajador"]["reembolsado"] == "4.00"
-    assert result["por_tipo"]["suscripcion_trabajador"]["neto"] == "10.00"
+    assert result["por_tipo"]["suscripcion_trabajador"]["USD"]["confirmado_bruto"] == "14.00"
+    assert result["por_tipo"]["suscripcion_trabajador"]["USD"]["reembolsado"] == "4.00"
+    assert result["por_tipo"]["suscripcion_trabajador"]["USD"]["neto"] == "10.00"
     assert result["por_moneda"]["USD"]["confirmado_bruto"] == "14.00"
     assert result["por_moneda"]["USD"]["reembolsado"] == "4.00"
     assert result["por_moneda"]["USD"]["neto"] == "10.00"
