@@ -10,7 +10,7 @@ from ..models.ad import Ad
 from ..models.audit_log import AuditLog
 from ..schemas.payment import SponsorAdRequest, PaymentResponse
 from ..services.auth import get_current_user, get_current_admin
-from ..services.plans import PRECIO_SUSCRIPCION_PREMIUM, SUSCRIPCION_PREMIUM_DIAS, PRECIO_TAREA_DESTACADA, TAREA_DESTACADA_DIAS, PRECIO_ANUNCIO_POR_DIA, MONEDA_DEFECTO
+from ..services.plans import PRECIO_SUSCRIPCION_PREMIUM, SUSCRIPCION_PREMIUM_DIAS, PRECIO_TAREA_DESTACADA, TAREA_DESTACADA_DIAS, PRECIO_ANUNCIO_POR_DIA, MONEDA_DEFECTO, is_premium_active
 
 router = APIRouter()
 INSTRUCCIONES_PAGO = "Todavía no hay una pasarela de pago digital conectada. Para confirmar este pago, contacta al equipo de ServiCuba con el id de este pago."
@@ -44,6 +44,12 @@ def request_feature_task(task_id, db=Depends(get_db), current_user=Depends(get_c
 
 @router.post("/sponsor-ad", response_model=PaymentResponse)
 def request_sponsor_ad(body: SponsorAdRequest, db=Depends(get_db), current_user=Depends(get_current_user)):
+    # Los anuncios son una superficie comercial Premium; no deben convertirse
+    # en un canal gratuito que transforme el marketplace en un Revolico.
+    if not current_user.es_trabajador:
+        raise HTTPException(status_code=403, detail="Los anuncios están reservados a profesionales")
+    if not is_premium_active(current_user):
+        raise HTTPException(status_code=403, detail="Los anuncios promocionales están disponibles sólo para cuentas Premium")
     if body.dias < 1 or body.dias > 90: raise HTTPException(status_code=400, detail="La duración debe ser entre 1 y 90 días")
     if not body.url_destino and not body.contacto: raise HTTPException(status_code=400, detail="Agrega un enlace o un teléfono/WhatsApp de contacto.")
     monto = round(PRECIO_ANUNCIO_POR_DIA * body.dias, 2)
