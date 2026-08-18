@@ -22,6 +22,7 @@ Convertir ServiCuba en un marketplace local de servicios, no en un clasificado g
 - [x] Plan Free: buscar/contratar sin necesidad de publicar servicios.
 - [x] Plan Base: publicar servicios con límite diario server-side.
 - [x] Plan Premium: publicar servicios con límite ampliado y beneficios de visibilidad preparados.
+- [x] API de entitlements para exponer plan, límites y capacidades reales al frontend.
 - [ ] Mostrar plan y límites reales en el perfil/dashboard.
 
 ## P2 — Reputación verificable
