@@ -18,10 +18,10 @@ Convertir ServiCuba en un marketplace local de servicios, no en un clasificado g
 - [x] Diferenciar `necesidad` (cliente busca ayuda) de `oferta` (trabajador ofrece servicio).
 - [ ] Separar claramente en UX: Tarea, Servicio, Anuncio y Perfil profesional.
 - [ ] Reglas de publicación por categoría para evitar contenido tipo clasificado general.
-- [ ] Flujo profesional para activar perfil de Trabajador.
-- [ ] Plan Free: buscar/contratar sin necesidad de publicar servicios.
-- [ ] Plan Base: publicar servicios con límite diario.
-- [ ] Plan Premium: mayor visibilidad y anuncios/promociones.
+- [x] Flujo profesional básico para activar perfil de Trabajador.
+- [x] Plan Free: buscar/contratar sin necesidad de publicar servicios.
+- [x] Plan Base: publicar servicios con límite diario server-side.
+- [x] Plan Premium: publicar servicios con límite ampliado y beneficios de visibilidad preparados.
 - [ ] Mostrar plan y límites reales en el perfil/dashboard.
 
 ## P2 — Reputación verificable
@@ -57,8 +57,8 @@ Convertir ServiCuba en un marketplace local de servicios, no en un clasificado g
 - [ ] Diferencias claras entre experiencia Cliente y Trabajador.
 
 ## P5 — Monetización
-- [ ] Entitlement de plan Base/Premium.
-- [ ] Límites diarios/semanales server-side.
+- [x] Entitlement básico de plan Base/Premium en el modelo de usuario.
+- [x] Límites diarios server-side para servicios: Base 1 / Premium 10.
 - [ ] Promociones/anuncios Premium.
 - [ ] Destacados y prioridad de visibilidad.
 - [ ] Expiración y renovación de planes.
