@@ -12,7 +12,10 @@ class UserRole(enum.Enum):
     TRABAJADOR = "trabajador"
 
 class UserPlan(enum.Enum):
+    # GRATIS = cliente/consumidor. BASE = profesional que publica servicios.
+    # PREMIUM = profesional con promoción/visibilidad adicional.
     GRATIS = "gratis"
+    BASE = "base"
     PREMIUM = "premium"
 
 class User(Base):
@@ -27,7 +30,7 @@ class User(Base):
     es_cliente = Column(Boolean, default=True, nullable=False)
     es_trabajador = Column(Boolean, default=False, nullable=False)
     modo_activo = Column(String(20), default="cliente", nullable=False)
-    suspendido = Column(Boolean, default=False, nullable=False, index=True)
+    suspendido = Column(Boolean, default=False, index=True)
 
     categoria_id = Column(Integer, ForeignKey("categories.id"), nullable=True)
     descripcion_trabajador = Column(Text, nullable=True)
