@@ -1,5 +1,6 @@
+import json
 import random
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
@@ -7,6 +8,7 @@ from sqlalchemy.orm import Session
 from ..database import get_db
 from ..models.user import User
 from ..models.ad import Ad
+from ..models.payment import Payment, PaymentType, PaymentStatus
 from ..schemas.ad import AdResponse
 from ..services.auth import get_current_user, get_current_admin
 
@@ -34,14 +36,7 @@ def get_active_ad(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Devuelve un anuncio activo para mostrar (prioriza los segmentados a
-    la categoría solicitada) y cuenta la impresión. current_user sólo se
-    exige para evitar scraping anónimo del inventario de anuncios.
-
-    `excluir`: ids (separados por coma) de anuncios que el frontend ya
-    mostró en este ciclo de rotación — ver frontend/js/monetization.js.
-    Se usa para no repetir uno hasta que hayan pasado todos los activos.
-    """
+    """Devuelve un anuncio activo para mostrar y cuenta la impresión."""
     now = datetime.utcnow()
     base_query = db.query(Ad).filter(
         Ad.activo == True,  # noqa: E712
@@ -99,10 +94,34 @@ def toggle_ad(
     db: Session = Depends(get_db),
     _admin: User = Depends(get_current_admin),
 ):
-    ad = db.query(Ad).filter(Ad.id == ad_id).first()
+    ad = db.query(Ad).filter(Ad.id == ad_id).with_for_update().first()
     if not ad:
         raise HTTPException(status_code=404, detail="Anuncio no encontrado")
-    ad.activo = not ad.activo
+
+    if not ad.activo:
+        # Un anuncio pagado entra INACTIVO y no consume su duración hasta
+        # que moderación lo aprueba. La duración se recupera del pago que
+        # originó el anuncio; no confiamos en datos enviados por el cliente.
+        if not ad.payment_id:
+            raise HTTPException(status_code=409, detail="El anuncio no tiene un pago asociado")
+        payment = db.query(Payment).filter(Payment.id == ad.payment_id).first()
+        if not payment or payment.tipo != PaymentType.ANUNCIO or payment.estado != PaymentStatus.CONFIRMADO:
+            raise HTTPException(status_code=409, detail="El pago asociado al anuncio no está confirmado")
+        try:
+            detalle = json.loads(payment.notas) if payment.notas else {}
+            dias = int(detalle.get("dias", 0))
+        except (TypeError, ValueError, json.JSONDecodeError):
+            raise HTTPException(status_code=409, detail="La duración del anuncio no es válida")
+        if not 1 <= dias <= 90:
+            raise HTTPException(status_code=409, detail="La duración del anuncio no es válida")
+        now = datetime.utcnow()
+        ad.fecha_inicio = now
+        ad.fecha_fin = now + timedelta(days=dias)
+        payment.entitlement_expires_at = ad.fecha_fin
+        ad.activo = True
+    else:
+        ad.activo = False
+
     db.commit()
     db.refresh(ad)
     return ad
