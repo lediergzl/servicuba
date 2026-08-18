@@ -1,4 +1,5 @@
 import { initModerationUi } from './moderation-ui.js';
+import { initPlansUi } from './plans-ui.js';
 
 function installModerationStyles() {
     if (document.getElementById('moderationUiStyles')) return;
@@ -16,6 +17,7 @@ function installModerationStyles() {
 function boot() {
     installModerationStyles();
     initModerationUi();
+    initPlansUi();
 }
 
 if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot, { once: true });
