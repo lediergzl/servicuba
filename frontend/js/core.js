@@ -43,9 +43,6 @@ export async function apiFetch(path, options = {}) {
     }
 
     if (!res.ok) {
-        // FastAPI 422 contains the exact field/path that failed validation.
-        // Keep that information visible in DevTools instead of reducing every
-        // failure to a generic "Error 422".
         const detail = data?.detail;
         const validation = Array.isArray(detail)
             ? detail.map(item => ({
@@ -243,4 +240,113 @@ export function showConfirm({ title, message, confirmLabel = 'Confirmar', cancel
         confirmBtn.addEventListener('click', () => close(true));
         overlay.addEventListener('click', (e) => { if (e.target === overlay) close(false); });
     });
+}
+
+// ---------- Geolocalización ----------
+const SAVED_LOCATION_KEY = 'servicuba:lastLocation';
+
+function readSavedLocation() {
+    try {
+        const value = JSON.parse(localStorage.getItem(SAVED_LOCATION_KEY) || 'null');
+        if (!value || !Number.isFinite(Number(value.lat)) || !Number.isFinite(Number(value.lng))) return null;
+        return { lat: Number(value.lat), lng: Number(value.lng), accuracy: value.accuracy || null, source: value.source || 'saved' };
+    } catch { return null; }
+}
+
+function toPosition(location) {
+    return {
+        coords: {
+            latitude: location.lat,
+            longitude: location.lng,
+            accuracy: location.accuracy || null
+        },
+        _servicubaSource: location.source || 'saved'
+    };
+}
+
+function requestBrowserGeolocation() {
+    return new Promise((resolve, reject) => {
+        if (!navigator.geolocation) {
+            reject(new Error('Tu navegador no soporta geolocalización.'));
+            return;
+        }
+        navigator.geolocation.getCurrentPosition(
+            position => {
+                const location = {
+                    lat: Number(position.coords.latitude),
+                    lng: Number(position.coords.longitude),
+                    accuracy: position.coords.accuracy || null,
+                    source: 'gps'
+                };
+                localStorage.setItem(SAVED_LOCATION_KEY, JSON.stringify(location));
+                position._servicubaSource = 'gps';
+                resolve(position);
+            },
+            reject,
+            { enableHighAccuracy: true, timeout: 10000, maximumAge: 60000 }
+        );
+    });
+}
+
+async function recoverGeolocation(initialError) {
+    let error = initialError;
+    while (true) {
+        const saved = readSavedLocation();
+        const result = await showFormModal({
+            title: 'Necesitamos tu ubicación',
+            confirmLabel: 'Continuar',
+            cancelLabel: 'Cancelar',
+            fields: [
+                {
+                    name: 'action',
+                    label: 'Cómo quieres continuar',
+                    type: 'select',
+                    required: true,
+                    value: saved ? 'saved' : 'retry',
+                    options: [
+                        { value: 'retry', label: 'Volver a intentar ubicación del navegador' },
+                        ...(saved ? [{ value: 'saved', label: 'Usar última ubicación guardada' }] : []),
+                        { value: 'manual', label: 'Introducir ubicación manualmente' }
+                    ]
+                },
+                { name: 'lat', label: 'Latitud', type: 'number', required: false, step: '0.000001', placeholder: 'Ej: 23.1136' },
+                { name: 'lng', label: 'Longitud', type: 'number', required: false, step: '0.000001', placeholder: 'Ej: -82.3666' }
+            ]
+        });
+
+        if (!result) throw error;
+        if (result.action === 'saved' && saved) return toPosition(saved);
+        if (result.action === 'manual') {
+            const lat = Number(result.lat);
+            const lng = Number(result.lng);
+            if (!Number.isFinite(lat) || !Number.isFinite(lng) || lat < -90 || lat > 90 || lng < -180 || lng > 180) {
+                notify('La latitud o longitud no es válida.', 'error');
+                continue;
+            }
+            const location = { lat, lng, accuracy: null, source: 'manual' };
+            localStorage.setItem(SAVED_LOCATION_KEY, JSON.stringify(location));
+            return toPosition(location);
+        }
+        try {
+            return await requestBrowserGeolocation();
+        } catch (retryError) {
+            error = retryError;
+            notify(`${geolocationErrorMessage(retryError)} Puedes volver a intentarlo, usar una ubicación guardada o introducirla manualmente.`, 'error');
+        }
+    }
+}
+
+export async function getGeolocation() {
+    try { return await requestBrowserGeolocation(); }
+    catch (err) { return recoverGeolocation(err); }
+}
+
+export function geolocationErrorMessage(err) {
+    if (!err) return 'No se pudo obtener tu ubicación.';
+    switch (err.code) {
+        case 1: return 'Activa el permiso de ubicación para continuar.';
+        case 2: return 'No se pudo determinar tu ubicación. Verifica el GPS.';
+        case 3: return 'La solicitud de ubicación tardó demasiado. Intenta de nuevo.';
+        default: return err.message || 'No se pudo obtener tu ubicación.';
+    }
 }
