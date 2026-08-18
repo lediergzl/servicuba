@@ -2,6 +2,7 @@
 // Notificaciones push (Web Push API + Service Worker)
 // ============================================================
 import { apiFetch, notify } from './core.js';
+import './reputation-ui.js';
 
 function urlBase64ToUint8Array(base64String) {
     const padding = '='.repeat((4 - (base64String.length % 4)) % 4);
