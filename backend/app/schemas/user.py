@@ -58,6 +58,17 @@ class Token(BaseModel):
     token_type: str
 
 
+class UserEntitlements(BaseModel):
+    puede_contratar: bool
+    puede_publicar_servicios: bool
+    servicios_por_dia: int
+    postulaciones_por_semana: Optional[int] = None
+    radio_max_km: float
+    puede_publicar_anuncios: bool
+    anuncios_por_dia: int
+    puede_destacar_tareas: bool
+
+
 class UserResponse(BaseModel):
     id: UUID
     nombre: str
@@ -78,6 +89,7 @@ class UserResponse(BaseModel):
     precio_hora: Optional[float] = None
     municipio: Optional[str] = None
     zona: Optional[str] = None
+    entitlements: UserEntitlements
 
 
 class ActivarTrabajadorRequest(BaseModel):
