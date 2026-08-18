@@ -9,7 +9,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import JSONResponse
-from .routers import auth, users, categories, tasks, applications, reviews, chat, push, verification, payments, ads, password_reset, task_lifecycle, admin, discovery, dashboard
+from .routers import auth, users, categories, tasks, applications, reviews, chat, push, verification, payments, ads, password_reset, task_lifecycle, admin, discovery, dashboard, reports
 from .database import engine, Base, SessionLocal
 from .models.category import Category
 from .models.user import User, UserRole
@@ -106,6 +106,7 @@ app.include_router(task_lifecycle.router, prefix="/api/tasks", tags=["Task lifec
 app.include_router(tasks.router, prefix="/api/tasks", tags=["Tasks"])
 app.include_router(applications.router, prefix="/api/applications", tags=["Applications"])
 app.include_router(reviews.router, prefix="/api/reviews", tags=["Reviews"])
+app.include_router(reports.router, prefix="/api/reports", tags=["Reports"])
 app.include_router(chat.router, prefix="/api/chat", tags=["Chat"])
 app.include_router(push.router, prefix="/api/push", tags=["Push"])
 app.include_router(verification.router, prefix="/api/verification", tags=["Verification"])
