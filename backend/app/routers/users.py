@@ -19,6 +19,57 @@ def get_profile(
     return build_user_response(db, current_user)
 
 
+@router.get("/entitlements")
+def get_entitlements(current_user: User = Depends(get_current_user)):
+    """Fuente única para que el frontend conozca qué puede hacer la cuenta.
+
+    FREE/GRATIS = contratar y descubrir.
+    BASE = publicar servicios profesionales.
+    PREMIUM = publicar servicios + promoción.
+
+    Las reglas críticas siguen aplicándose en backend; este endpoint sólo
+    expone el estado para que la UI pueda explicarlo correctamente.
+    """
+    plan = current_user.plan.value if hasattr(current_user.plan, "value") else str(current_user.plan)
+    if plan == "PREMIUM":
+        services_daily_limit = 10
+        max_radius_km = 50
+        can_publish_service = True
+        can_publish_ads = True
+        ads_daily_limit = 10
+        priority_notifications = True
+    elif plan == "BASE":
+        services_daily_limit = 1
+        max_radius_km = 3
+        can_publish_service = True
+        can_publish_ads = False
+        ads_daily_limit = 0
+        priority_notifications = False
+    else:
+        services_daily_limit = 0
+        max_radius_km = 3
+        can_publish_service = False
+        can_publish_ads = False
+        ads_daily_limit = 0
+        priority_notifications = False
+
+    return {
+        "plan": plan,
+        "plan_expira": current_user.plan_expira.isoformat() if current_user.plan_expira else None,
+        "es_cliente": bool(current_user.es_cliente),
+        "es_trabajador": bool(current_user.es_trabajador),
+        "can_discover": True,
+        "can_contact": True,
+        "can_publish_need": True,
+        "can_publish_service": can_publish_service,
+        "services_daily_limit": services_daily_limit,
+        "max_radius_km": max_radius_km,
+        "can_publish_ads": can_publish_ads,
+        "ads_daily_limit": ads_daily_limit,
+        "priority_notifications": priority_notifications,
+    }
+
+
 @router.put("/activar-trabajador", response_model=UserResponse)
 def activar_trabajador(
     body: ActivarTrabajadorRequest,
