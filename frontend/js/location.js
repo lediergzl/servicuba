@@ -1,13 +1,8 @@
 import { getGeolocation } from './core.js';
+import { nativeGetCurrentPosition, isNativeApp } from './native.js';
 
 const STORAGE_KEY = 'servicuba:lastLocation';
 
-/**
- * Fuente única para obtener la ubicación usada por mapa y descubrimiento.
- * core.getGeolocation ya contiene el flujo de recuperación (GPS, reintento,
- * ubicación guardada y ubicación manual), por lo que este módulo no debe
- * mostrar un segundo modal cuando el primer intento falla.
- */
 export async function getLocationWithFallback() {
     try {
         const pos = await getGeolocation();
@@ -41,4 +36,27 @@ export function getSavedLocation() {
 
 export function clearSavedLocation() {
     localStorage.removeItem(STORAGE_KEY);
+}
+
+// Punto único de entrada para ubicación. Si la APK expone el puente nativo,
+// usamos GPS nativo; la web normal sigue usando core.js/navigator.geolocation.
+export async function getBestLocation() {
+    if (isNativeApp()) {
+        try {
+            const pos = await nativeGetCurrentPosition();
+            if (pos?.coords) {
+                const location = {
+                    lat: Number(pos.coords.latitude),
+                    lng: Number(pos.coords.longitude),
+                    accuracy: pos.coords.accuracy || null,
+                    source: 'native-gps'
+                };
+                localStorage.setItem(STORAGE_KEY, JSON.stringify(location));
+                return location;
+            }
+        } catch (err) {
+            console.warn('[ServiCuba] GPS nativo no disponible, usando fallback web:', err);
+        }
+    }
+    return getLocationWithFallback();
 }
