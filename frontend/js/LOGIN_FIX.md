@@ -1,0 +1,1 @@
+Login endpoint intentionally returns HTTP 401 for invalid credentials. The client must not interpret that response as an expired authenticated session because the user is not authenticated yet.
