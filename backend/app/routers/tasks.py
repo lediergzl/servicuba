@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 from sqlalchemy import func, cast
-from datetime import datetime
+from datetime import datetime, timedelta
 from geoalchemy2 import Geography
 from geoalchemy2.functions import ST_DWithin, ST_Distance, ST_SetSRID, ST_MakePoint, ST_X, ST_Y
 from ..database import get_db
@@ -9,7 +9,13 @@ from ..models.task import Task, TaskStatus
 from ..models.user import User, UserPlan
 from ..schemas.task import TaskCreate, TaskUpdate, TaskResponse
 from ..services.auth import get_current_user
-from ..services.plans import is_premium_active, PLAN_GRATIS_RADIO_MAX_KM, PLAN_PREMIUM_RADIO_MAX_KM
+from ..services.plans import (
+    is_premium_active,
+    services_daily_limit,
+    effective_plan,
+    PLAN_GRATIS_RADIO_MAX_KM,
+    PLAN_PREMIUM_RADIO_MAX_KM,
+)
 from ..services.nearby import find_nearby
 from ..services.notificaciones import notificar_nuevos_trabajadores_cercanos
 from uuid import UUID
@@ -19,21 +25,31 @@ import logging
 logger = logging.getLogger("tasks")
 router = APIRouter()
 
+
+def _publicaciones_hoy(db: Session, user_id: UUID, tipo: str) -> int:
+    """Cuenta publicaciones comerciales del usuario desde medianoche UTC."""
+    inicio = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
+    return (
+        db.query(func.count(Task.id))
+        .filter(
+            Task.cliente_id == user_id,
+            Task.tipo == tipo,
+            Task.created_at >= inicio,
+        )
+        .scalar()
+        or 0
+    )
+
+
 @router.post("", response_model=TaskResponse)
 def create_task(
     task: TaskCreate,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    # Antes: `current_user.rol.value != "cliente"`. `rol` es el campo
-    # DEPRECADO de antes de la dualidad de roles (ver models/user.py) y
-    # el registro ya NO lo asigna — queda en None para toda cuenta nueva.
-    # Eso hacía que ESTA línea rompiera con AttributeError
-    # ("'NoneType' object has no attribute 'value'") en cada intento de
-    # crear una tarea, así que ninguna tarea llegaba nunca a guardarse en
-    # la base de datos (de ahí que nunca aparecieran en "cercanas"/mapa).
     if not current_user.es_cliente:
         raise HTTPException(status_code=403, detail="Activa tu perfil de cliente para crear tareas")
+
     point = ST_SetSRID(ST_MakePoint(task.lng, task.lat), 4326)
     db_task = Task(
         cliente_id=current_user.id,
@@ -45,24 +61,20 @@ def create_task(
         municipio=task.municipio,
         zona=task.zona,
         referencia=task.referencia,
-        estado=TaskStatus.ACTIVA
+        estado=TaskStatus.ACTIVA,
+        tipo="necesidad",
     )
     db.add(db_task)
     db.commit()
     db.refresh(db_task)
 
-    # Aviso push a trabajadores de la categoría/zona — Premium al
-    # instante, plan gratis con retraso (ver services/notificaciones.py
-    # para el detalle del beneficio "prioridad en notificaciones" del
-    # plan Pro). No debe poder tumbar la creación de la tarea si algo
-    # falla acá (ej. un problema puntual de red al mandar un push); la
-    # tarea ya se guardó, así que se aísla en su propio try/except.
     try:
         notificar_nuevos_trabajadores_cercanos(db, db_task, task.lat, task.lng)
     except Exception:
         logger.warning("No se pudo notificar a trabajadores cercanos de la tarea %s", db_task.id, exc_info=True)
 
     return db_task
+
 
 @router.get("/nearby")
 def get_nearby_tasks(
@@ -73,28 +85,14 @@ def get_nearby_tasks(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    # El radio de búsqueda es un beneficio del plan: gratis ve cerca,
-    # premium ve más lejos. Se limita silenciosamente en vez de rechazar
-    # la petición, para no romper al frontend si pide de más.
     radio_max = PLAN_PREMIUM_RADIO_MAX_KM if is_premium_active(current_user) else PLAN_GRATIS_RADIO_MAX_KM
     radius_km = min(radius_km, radio_max)
-
     radius_m = radius_km * 1000
     point = ST_SetSRID(ST_MakePoint(lng, lat), 4326)
-    # ubicacion es Geometry(SRID 4326): sin castear a geography, PostGIS
-    # calcula ST_Distance/ST_DWithin en GRADOS, no en metros. Eso hacía que
-    # "distancia_km" saliera siempre ~0 (una fracción de grado dividida
-    # entre 1000) y que ST_DWithin(..., radius_m) — comparando miles contra
-    # fracciones de grado — fuera prácticamente siempre verdadero sin
-    # importar el radio elegido, o sea el filtro de radio no filtraba nada.
     geo_task = cast(Task.ubicacion, Geography)
     geo_point = cast(point, Geography)
     now = datetime.utcnow()
 
-    # Pin dorado automático del plan "ServiCuba Pro" (mismo mecanismo que
-    # /tasks/ofertas/nearby en services/nearby.py — ver la nota grande
-    # ahí sobre por qué se calcula en SQL y por qué se combina con la
-    # destacada pagada en vez de reemplazarla).
     publicador_premium = (
         (User.plan == UserPlan.PREMIUM)
         & (User.plan_expira.isnot(None))
@@ -112,19 +110,18 @@ def get_nearby_tasks(
         .join(User, User.id == Task.cliente_id)
         .filter(
             Task.estado == TaskStatus.ACTIVA,
+            Task.tipo == "necesidad",
             ST_DWithin(geo_task, geo_point, radius_m),
         )
     )
     if category_id:
         query = query.filter(Task.categoria_id == category_id)
-    # Las tareas destacadas (pagas o por plan Premium del publicador)
-    # aparecen primero; dentro de cada grupo, ordena por cercanía.
     destacada_pagada = (Task.destacada == True) & (Task.destacada_hasta > now)  # noqa: E712
     boost_activo = destacada_pagada | publicador_premium
     results = query.order_by(boost_activo.desc(), "distance").limit(50).all()
-    tasks = []
-    for task, dist, task_lat, task_lng, premium in results:
-        tasks.append({
+
+    return [
+        {
             "id": task.id,
             "titulo": task.titulo,
             "precio": task.precio,
@@ -138,40 +135,31 @@ def get_nearby_tasks(
             "created_at": task.created_at,
             "lat": task_lat,
             "lng": task_lng,
-        })
-    return tasks
+        }
+        for task, dist, task_lat, task_lng, premium in results
+    ]
+
 
 @router.get("/my")
 def get_my_tasks(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    # NOTA: agregado porque frontend/js/tasks.js llama a GET /api/tasks/my
-    # y el router original no lo definía (era una llamada rota).
-    # Debe declararse ANTES de /{task_id} para que "my" no se intente
-    # interpretar como un UUID.
     from ..models.application import Application, AppStatus
     from ..models.user import User as UserModel
     from ..models.review import Review
 
     tasks = (
         db.query(Task)
-        .filter(Task.cliente_id == current_user.id)
+        .filter(Task.cliente_id == current_user.id, Task.tipo == "necesidad")
         .order_by(Task.created_at.desc())
         .all()
     )
 
     now = datetime.utcnow()
-    # Todas estas tareas las publicó current_user, así que su estado
-    # Premium se evalúa UNA sola vez (no por fila, a diferencia de
-    # get_nearby_tasks/find_nearby donde el publicador varía por
-    # resultado) — ver is_premium_active() en services/plans.py.
     publicador_premium = is_premium_active(current_user)
-
     result = []
     for task in tasks:
-        # Nombre del trabajador aceptado (si lo hay) — se usa para poner
-        # un encabezado real en el chat en vez de dejarlo en blanco.
         worker_id = None
         worker_nombre = None
         if task.estado.value in ("asignada", "en_proceso", "completada"):
@@ -200,11 +188,6 @@ def get_my_tasks(
             "zona": task.zona,
             "referencia": task.referencia,
             "estado": task.estado.value,
-            # true si pagó por destacarla O si el plan Premium se la da
-            # gratis — tasks.js ya usa este mismo campo para decidir si
-            # mostrar el botón "★ Destacar" (canFeature = activa &&
-            # !destacada), así que un trabajador Premium deja de ver ese
-            # botón en sus propias publicaciones sin tocar el frontend.
             "destacada": bool(
                 (task.destacada and task.destacada_hasta and task.destacada_hasta > now)
                 or publicador_premium
@@ -218,15 +201,7 @@ def get_my_tasks(
     return result
 
 
-# ---------- Ofertas (trabajador publica un servicio, cliente lo solicita) ----------
-# Mismo mecanismo que las "necesidades" de arriba, en la dirección
-# contraria — ver la nota grande en frontend/js/tasks.js y en
-# services/nearby.py sobre por qué casi todo el resto (postularse/
-# solicitar, aceptar, chat, destacar) ya es genérico y no necesita rutas
-# propias. Sólo faltaban estas tres: crear, buscar cercanas y listar
-# las propias. Deben declararse ANTES de GET /{task_id} para que
-# "ofertas" no se intente interpretar como un UUID.
-
+# ---------- Servicios profesionales ----------
 @router.post("/ofertas", response_model=TaskResponse)
 def create_oferta(
     task: TaskCreate,
@@ -235,9 +210,25 @@ def create_oferta(
 ):
     if not current_user.es_trabajador:
         raise HTTPException(status_code=403, detail="Activa tu perfil de trabajador para publicar un servicio")
+
+    plan = effective_plan(current_user)
+    limite = services_daily_limit(current_user)
+    usados = _publicaciones_hoy(db, current_user.id, "oferta")
+    if usados >= limite:
+        raise HTTPException(
+            status_code=403,
+            detail={
+                "code": "DAILY_SERVICE_LIMIT",
+                "message": f"Tu plan {plan.upper()} permite {limite} servicio{'s' if limite != 1 else ''} publicado{'s' if limite != 1 else ''} por día.",
+                "plan": plan,
+                "limit": limite,
+                "used": usados,
+            },
+        )
+
     point = ST_SetSRID(ST_MakePoint(task.lng, task.lat), 4326)
     db_task = Task(
-        cliente_id=current_user.id,  # quien PUBLICÓ (el trabajador) — ver nota en models/task.py
+        cliente_id=current_user.id,
         categoria_id=task.categoria_id,
         titulo=task.titulo,
         descripcion=task.descripcion,
@@ -264,8 +255,6 @@ def get_nearby_ofertas(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    # Mismo beneficio de radio por plan que /tasks/nearby, aplicado acá
-    # aunque quien busca sea un cliente (no sólo trabajadores premium).
     radio_max = PLAN_PREMIUM_RADIO_MAX_KM if is_premium_active(current_user) else PLAN_GRATIS_RADIO_MAX_KM
     radius_km = min(radius_km, radio_max)
     return find_nearby(db, lat, lng, radius_km, tipo="oferta", category_id=category_id)
@@ -285,17 +274,10 @@ def get_my_ofertas(
         .order_by(Task.created_at.desc())
         .all()
     )
-
     now = datetime.utcnow()
-    # Mismo motivo que en get_my_tasks: el publicador de TODAS estas
-    # ofertas es siempre current_user, así que se evalúa una sola vez.
     publicador_premium = is_premium_active(current_user)
-
     result = []
     for oferta in ofertas:
-        # Nombre del CLIENTE cuya solicitud fue aceptada (si lo hay) —
-        # tasks.js usa esto para el encabezado del chat de una oferta
-        # (openChatForTask lee o.cliente_nombre, no o.trabajador_nombre).
         cliente_solicitante_id = None
         cliente_nombre = None
         if oferta.estado.value in ("asignada", "en_proceso", "completada"):
@@ -308,7 +290,6 @@ def get_my_ofertas(
             if row:
                 cliente_solicitante_id = str(row.id)
                 cliente_nombre = row.nombre
-
         result.append({
             "id": str(oferta.id),
             "cliente_id": str(oferta.cliente_id),
@@ -320,8 +301,6 @@ def get_my_ofertas(
             "zona": oferta.zona,
             "referencia": oferta.referencia,
             "estado": oferta.estado.value,
-            # Pin dorado automático del plan Pro — ver comentario
-            # equivalente en get_my_tasks() más arriba.
             "destacada": bool(
                 (oferta.destacada and oferta.destacada_hasta and oferta.destacada_hasta > now)
                 or publicador_premium
@@ -341,6 +320,7 @@ def get_task(task_id: UUID, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="Tarea no encontrada")
     return task
 
+
 @router.put("/{task_id}", response_model=TaskResponse)
 def update_task(
     task_id: UUID,
@@ -348,25 +328,21 @@ def update_task(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    # Antes no existía ninguna forma de editar una tarea ya creada —
-    # cualquier error de tipeo (precio, descripción) quedaba fijo para
-    # siempre. Sólo se permite mientras está "activa": una vez asignada,
-    # el trabajador ya aceptó en base a esos datos.
     task = db.query(Task).filter(Task.id == task_id).first()
     if not task:
         raise HTTPException(status_code=404, detail="Tarea no encontrada")
     if task.cliente_id != current_user.id:
-        raise HTTPException(status_code=403, detail="No eres el cliente de esta tarea")
+        raise HTTPException(status_code=403, detail="No eres el publicador de esta publicación")
     if task.estado != TaskStatus.ACTIVA:
-        raise HTTPException(status_code=400, detail="Sólo se puede editar una tarea mientras está activa (sin trabajador asignado)")
+        raise HTTPException(status_code=400, detail="Sólo se puede editar una publicación mientras está activa")
 
     data = payload.model_dump(exclude_unset=True)
     for field, value in data.items():
         setattr(task, field, value)
-
     db.commit()
     db.refresh(task)
     return task
+
 
 @router.delete("/{task_id}")
 def delete_task(
@@ -374,23 +350,20 @@ def delete_task(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    # Antes no existía ninguna forma de eliminar/cancelar una tarea. Es un
-    # borrado lógico (CANCELADA), no un DELETE real: applications y
-    # messages tienen FK a tasks.id, así que borrarla de la tabla
-    # rompería ese historial (o directamente fallaría por la FK).
     task = db.query(Task).filter(Task.id == task_id).first()
     if not task:
         raise HTTPException(status_code=404, detail="Tarea no encontrada")
     if task.cliente_id != current_user.id:
-        raise HTTPException(status_code=403, detail="No eres el cliente de esta tarea")
+        raise HTTPException(status_code=403, detail="No eres el publicador de esta publicación")
     if task.estado == TaskStatus.COMPLETADA:
-        raise HTTPException(status_code=400, detail="No se puede cancelar una tarea ya completada")
+        raise HTTPException(status_code=400, detail="No se puede cancelar una publicación ya completada")
     if task.estado == TaskStatus.CANCELADA:
-        raise HTTPException(status_code=400, detail="Esta tarea ya está cancelada")
+        raise HTTPException(status_code=400, detail="Esta publicación ya está cancelada")
 
     task.estado = TaskStatus.CANCELADA
     db.commit()
-    return {"message": "Tarea cancelada correctamente"}
+    return {"message": "Publicación cancelada correctamente"}
+
 
 @router.post("/{task_id}/complete", response_model=TaskResponse)
 def complete_task(
@@ -398,16 +371,13 @@ def complete_task(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    # NOTA: agregado porque el router de reviews exige que la tarea esté
-    # en estado COMPLETADA, pero no existía ninguna ruta que hiciera esa
-    # transición: la reseña era inalcanzable en el flujo original.
     task = db.query(Task).filter(Task.id == task_id).first()
     if not task:
         raise HTTPException(status_code=404, detail="Tarea no encontrada")
     if task.cliente_id != current_user.id:
-        raise HTTPException(status_code=403, detail="No eres el cliente de esta tarea")
+        raise HTTPException(status_code=403, detail="No eres el publicador de esta publicación")
     if task.estado not in (TaskStatus.ASIGNADA, TaskStatus.EN_PROCESO):
-        raise HTTPException(status_code=400, detail="La tarea debe estar asignada para marcarla como completada")
+        raise HTTPException(status_code=400, detail="La publicación debe estar asignada para marcarla como completada")
     task.estado = TaskStatus.COMPLETADA
     db.commit()
     db.refresh(task)
