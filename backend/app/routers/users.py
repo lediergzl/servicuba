@@ -3,7 +3,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import func
 from typing import Optional
 from ..database import get_db
-from ..models.user import User
+from ..models.user import User, UserPlan
 from ..models.category import Category
 from ..schemas.user import UserResponse, ActivarTrabajadorRequest, ModoActivoRequest
 from ..services.auth import get_current_user, get_current_admin
@@ -25,9 +25,13 @@ def activar_trabajador(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Activa (o actualiza, si ya estaba activo) el perfil de trabajador
-    del usuario — requerido antes de poder cambiar al modo Trabajador
-    (PUT /modo-activo), postularse a tareas o publicar ofertas."""
+    """Activa o actualiza el perfil profesional del usuario.
+
+    Activar el perfil de trabajador convierte automáticamente una cuenta
+    consumidora GRATIS en BASE. Así el modelo comercial queda claro:
+    GRATIS = buscar/contratar; BASE = publicar servicios; PREMIUM =
+    publicar y promocionar con beneficios ampliados.
+    """
     categoria = db.query(Category).filter(Category.id == body.categoria_id).first()
     if not categoria:
         raise HTTPException(status_code=400, detail="Categoría inválida")
@@ -45,6 +49,11 @@ def activar_trabajador(
     if body.lng is not None:
         current_user.lng = body.lng
 
+    # Compatibilidad: cuentas antiguas con plan GRATIS que pasan a ser
+    # profesionales reciben BASE sin tocar una suscripción Premium vigente.
+    if current_user.plan == UserPlan.GRATIS:
+        current_user.plan = UserPlan.BASE
+
     db.commit()
     db.refresh(current_user)
     return build_user_response(db, current_user)
@@ -56,9 +65,7 @@ def cambiar_modo_activo(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Guarda qué panel (cliente/trabajador) vio el usuario por última vez.
-    Se persiste en el SERVIDOR (no sólo en localStorage) para que la app
-    recuerde el modo elegido entre dispositivos y sesiones."""
+    """Guarda qué panel (cliente/trabajador) vio el usuario por última vez."""
     if body.modo not in ("cliente", "trabajador"):
         raise HTTPException(status_code=400, detail="Modo inválido: debe ser 'cliente' o 'trabajador'")
     if body.modo == "cliente" and not current_user.es_cliente:
@@ -76,12 +83,6 @@ def cambiar_modo_activo(
 
 
 # ---------- Estadísticas públicas ----------
-# Sin autenticación a propósito: alimenta el buscador instantáneo del
-# Hero en la landing page ("¿Qué necesitas reparar?"), que se ve ANTES
-# de iniciar sesión — ver frontend/js/landing.js. Una sola consulta
-# agregada (GROUP BY) en vez de contar por categoría en un loop, para no
-# introducir N+1 en una pantalla que se carga en cada visita anónima.
-
 @router.get("/stats/workers-count")
 def workers_count(db: Session = Depends(get_db)):
     total = db.query(User).filter(User.es_trabajador == True).count()  # noqa: E712
@@ -98,13 +99,6 @@ def workers_count(db: Session = Depends(get_db)):
 
 
 # ---------- Administración ----------
-# Antes no existía NINGUNA pantalla para ver/gestionar usuarios en el
-# panel de admin (sólo pagos/anuncios/categorías). Se agrega un listado
-# simple con búsqueda + verificación manual — útil mientras no exista una
-# pasarela de SMS real (ver routers/verification.py), un admin puede
-# confirmar la identidad de alguien por otro medio (ej. llamada, WhatsApp)
-# y marcarlo verificado a mano.
-
 @router.get("/admin/list")
 def list_users_admin(
     q: Optional[str] = None,
