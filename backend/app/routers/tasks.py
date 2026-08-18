@@ -27,7 +27,7 @@ router = APIRouter()
 
 
 def _publicaciones_hoy(db: Session, user_id: UUID, tipo: str) -> int:
-    """Cuenta publicaciones comerciales del usuario desde medianoche UTC."""
+    """Cuenta publicaciones del usuario desde medianoche UTC."""
     inicio = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
     return (
         db.query(func.count(Task.id))
@@ -41,6 +41,30 @@ def _publicaciones_hoy(db: Session, user_id: UUID, tipo: str) -> int:
     )
 
 
+def _validar_permiso_publicacion(db: Session, user: User, tipo: str = "necesidad") -> str:
+    """La UI nunca es la autoridad: el plan se valida aquí antes de escribir.
+
+    FREE descubre, contacta y contrata, pero no publica. BASE y PREMIUM
+    pueden publicar dentro de su cuota diaria.
+    """
+    plan = effective_plan(user)
+    if plan == UserPlan.GRATIS.value:
+        raise HTTPException(
+            status_code=403,
+            detail="Tu plan FREE permite buscar y contratar servicios. Actualiza a BASE para publicar.",
+        )
+
+    limite = services_daily_limit(user)
+    usados = _publicaciones_hoy(db, user.id, tipo)
+    if usados >= limite:
+        nombre = "Premium" if plan == UserPlan.PREMIUM.value else "Base"
+        raise HTTPException(
+            status_code=429,
+            detail=f"Alcanzaste el límite diario de {limite} publicación(es) de tu plan {nombre}.",
+        )
+    return plan
+
+
 @router.post("", response_model=TaskResponse)
 def create_task(
     task: TaskCreate,
@@ -49,6 +73,8 @@ def create_task(
 ):
     if not current_user.es_cliente:
         raise HTTPException(status_code=403, detail="Activa tu perfil de cliente para crear tareas")
+
+    _validar_permiso_publicacion(db, current_user, "necesidad")
 
     point = ST_SetSRID(ST_MakePoint(task.lng, task.lat), 4326)
     db_task = Task(
@@ -194,121 +220,9 @@ def get_my_tasks(
             ),
             "destacada_hasta": task.destacada_hasta,
             "created_at": task.created_at,
-            "trabajador_id": worker_id,
-            "trabajador_nombre": worker_nombre,
+            "worker_id": worker_id,
+            "worker_nombre": worker_nombre,
             "ya_reseniada": ya_reseniada,
-        })
-    return result
-
-
-# ---------- Servicios profesionales ----------
-@router.post("/ofertas", response_model=TaskResponse)
-def create_oferta(
-    task: TaskCreate,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
-):
-    if not current_user.es_trabajador:
-        raise HTTPException(status_code=403, detail="Activa tu perfil de trabajador para publicar un servicio")
-
-    plan = effective_plan(current_user)
-    limite = services_daily_limit(current_user)
-    usados = _publicaciones_hoy(db, current_user.id, "oferta")
-    if usados >= limite:
-        raise HTTPException(
-            status_code=403,
-            detail={
-                "code": "DAILY_SERVICE_LIMIT",
-                "message": f"Tu plan {plan.upper()} permite {limite} servicio{'s' if limite != 1 else ''} publicado{'s' if limite != 1 else ''} por día.",
-                "plan": plan,
-                "limit": limite,
-                "used": usados,
-            },
-        )
-
-    point = ST_SetSRID(ST_MakePoint(task.lng, task.lat), 4326)
-    db_task = Task(
-        cliente_id=current_user.id,
-        categoria_id=task.categoria_id,
-        titulo=task.titulo,
-        descripcion=task.descripcion,
-        precio=task.precio,
-        ubicacion=point,
-        municipio=task.municipio,
-        zona=task.zona,
-        referencia=task.referencia,
-        estado=TaskStatus.ACTIVA,
-        tipo="oferta",
-    )
-    db.add(db_task)
-    db.commit()
-    db.refresh(db_task)
-    return db_task
-
-
-@router.get("/ofertas/nearby")
-def get_nearby_ofertas(
-    lat: float = Query(...),
-    lng: float = Query(...),
-    radius_km: float = Query(3.0, ge=0.1, le=50),
-    category_id: Optional[int] = None,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
-):
-    radio_max = PLAN_PREMIUM_RADIO_MAX_KM if is_premium_active(current_user) else PLAN_GRATIS_RADIO_MAX_KM
-    radius_km = min(radius_km, radio_max)
-    return find_nearby(db, lat, lng, radius_km, tipo="oferta", category_id=category_id)
-
-
-@router.get("/ofertas/mine")
-def get_my_ofertas(
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
-):
-    from ..models.application import Application, AppStatus
-    from ..models.user import User as UserModel
-
-    ofertas = (
-        db.query(Task)
-        .filter(Task.cliente_id == current_user.id, Task.tipo == "oferta")
-        .order_by(Task.created_at.desc())
-        .all()
-    )
-    now = datetime.utcnow()
-    publicador_premium = is_premium_active(current_user)
-    result = []
-    for oferta in ofertas:
-        cliente_solicitante_id = None
-        cliente_nombre = None
-        if oferta.estado.value in ("asignada", "en_proceso", "completada"):
-            row = (
-                db.query(UserModel.id, UserModel.nombre)
-                .join(Application, Application.worker_id == UserModel.id)
-                .filter(Application.task_id == oferta.id, Application.estado == AppStatus.ACEPTADA)
-                .first()
-            )
-            if row:
-                cliente_solicitante_id = str(row.id)
-                cliente_nombre = row.nombre
-        result.append({
-            "id": str(oferta.id),
-            "cliente_id": str(oferta.cliente_id),
-            "categoria_id": oferta.categoria_id,
-            "titulo": oferta.titulo,
-            "descripcion": oferta.descripcion,
-            "precio": oferta.precio,
-            "municipio": oferta.municipio,
-            "zona": oferta.zona,
-            "referencia": oferta.referencia,
-            "estado": oferta.estado.value,
-            "destacada": bool(
-                (oferta.destacada and oferta.destacada_hasta and oferta.destacada_hasta > now)
-                or publicador_premium
-            ),
-            "destacada_hasta": oferta.destacada_hasta,
-            "created_at": oferta.created_at,
-            "cliente_solicitante_id": cliente_solicitante_id,
-            "cliente_nombre": cliente_nombre,
         })
     return result
 
