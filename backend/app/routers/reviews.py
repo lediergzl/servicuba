@@ -33,6 +33,32 @@ def _summary(db: Session, worker: User):
     }
 
 
+def _experience_query(db: Session, worker_id):
+    return (
+        db.query(Review, Task)
+        .join(Task, Task.id == Review.task_id)
+        .filter(Review.trabajador_id == worker_id)
+        .order_by(Review.created_at.desc())
+    )
+
+
+def _experience(review: Review, task: Task):
+    return {
+        "id": str(review.id),
+        "task_id": str(review.task_id),
+        "rating": review.rating,
+        "calidad_trabajo": review.calidad_trabajo,
+        "trato": review.trato,
+        "puntualidad": review.puntualidad,
+        "precio_acordado": review.precio_acordado,
+        "comentario": review.comentario,
+        "created_at": review.created_at.isoformat() if review.created_at else None,
+        "categoria": getattr(task, "categoria_id", None),
+        "municipio": getattr(task, "municipio", None),
+        "verified": True,
+    }
+
+
 @router.post("", response_model=ReviewResponse)
 def create_review(review: ReviewCreate, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     task = db.query(Task).filter(Task.id == review.task_id).with_for_update().first()
@@ -74,6 +100,25 @@ def worker_reputation_summary(worker_id: str, db: Session = Depends(get_db)):
     if not worker:
         raise HTTPException(status_code=404, detail="Trabajador no encontrado")
     return _summary(db, worker)
+
+
+@router.get("/worker/{worker_id}/experiences")
+def worker_experiences(worker_id: str, limit: int = Query(default=8, ge=1, le=30), offset: int = Query(default=0, ge=0), db: Session = Depends(get_db)):
+    """Experiencias verificadas: sólo reseñas asociadas a trabajos confirmados."""
+    worker = db.query(User).filter(User.id == worker_id, User.es_trabajador.is_(True)).first()
+    if not worker:
+        raise HTTPException(status_code=404, detail="Trabajador no encontrado")
+
+    rows = _experience_query(db, worker.id).offset(offset).limit(limit).all()
+    total = db.query(func.count(Review.id)).filter(Review.trabajador_id == worker.id).scalar() or 0
+    return {
+        "worker_id": str(worker.id),
+        "verified": True,
+        "total": int(total),
+        "offset": offset,
+        "limit": limit,
+        "items": [_experience(review, task) for review, task in rows],
+    }
 
 
 @router.get("/tasks/summaries")
