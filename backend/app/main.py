@@ -13,6 +13,7 @@ from .routers import auth, users, categories, tasks, applications, reviews, chat
 from .database import engine, Base, SessionLocal
 from .models.category import Category
 from .models.user import User, UserRole
+from .models.native_push_token import NativePushToken
 from .config import get_settings
 from .utils.security import get_password_hash
 from .services.notificaciones import procesar_notificaciones_pendientes
@@ -84,6 +85,7 @@ with engine.connect() as conn:
     conn.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS uq_reviews_task ON reviews (task_id)"))
     conn.execute(text("CREATE INDEX IF NOT EXISTS idx_reviews_worker ON reviews (trabajador_id)"))
     conn.execute(text("CREATE INDEX IF NOT EXISTS idx_reviews_client ON reviews (cliente_id)"))
+    conn.execute(text("CREATE INDEX IF NOT EXISTS idx_native_push_tokens_user ON native_push_tokens (user_id)"))
     conn.commit()
 _DEFAULT_CATEGORIES = [(1, "Electricista", "⚡"), (2, "Plomero", "🔧"), (3, "Reparador", "🛠"), (4, "Albañil", "🧱")]
 with SessionLocal() as db:
