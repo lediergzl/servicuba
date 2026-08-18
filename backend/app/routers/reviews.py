@@ -12,14 +12,17 @@ from ..services.auth import get_current_user
 router = APIRouter()
 
 
+def _avg(db: Session, worker_id, column):
+    value = db.query(func.avg(column)).filter(Review.trabajador_id == worker_id).scalar()
+    return round(float(value), 2) if value is not None else None
+
+
 @router.post("", response_model=ReviewResponse)
 def create_review(
     review: ReviewCreate,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    # A review belongs to a closed, confirmed contract. Lock the task so two
-    # concurrent review requests cannot both pass the uniqueness check.
     task = (
         db.query(Task)
         .filter(Task.id == review.task_id)
@@ -44,8 +47,6 @@ def create_review(
     if not accepted:
         raise HTTPException(status_code=400, detail="La tarea no tiene un trabajador asignado")
 
-    # For a normal need, the accepted applicant is the worker. For an offer,
-    # the publisher is the worker and the accepted applicant is the client.
     expected_worker_id = accepted.worker_id if task.tipo != "oferta" else task.cliente_id
     expected_client_id = task.cliente_id if task.tipo != "oferta" else accepted.worker_id
 
@@ -63,20 +64,42 @@ def create_review(
         cliente_id=expected_client_id,
         trabajador_id=expected_worker_id,
         rating=review.rating,
-        comentario=review.comentario
+        calidad_trabajo=review.calidad_trabajo,
+        trato=review.trato,
+        puntualidad=review.puntualidad,
+        precio_acordado=review.precio_acordado,
+        comentario=review.comentario,
     )
     db.add(db_review)
     db.flush()
 
     worker = db.query(User).filter(User.id == expected_worker_id).first()
     if worker:
-        avg_rating = (
-            db.query(func.avg(Review.rating))
-            .filter(Review.trabajador_id == worker.id)
-            .scalar()
-        )
+        avg_rating = db.query(func.avg(Review.rating)).filter(Review.trabajador_id == worker.id).scalar()
         worker.rating = float(avg_rating or 0.0)
 
     db.commit()
     db.refresh(db_review)
     return db_review
+
+
+@router.get("/worker/{worker_id}/summary")
+def worker_reputation_summary(worker_id: str, db: Session = Depends(get_db)):
+    """Resumen público de reputación basada en trabajos confirmados."""
+    worker = db.query(User).filter(User.id == worker_id, User.es_trabajador.is_(True)).first()
+    if not worker:
+        raise HTTPException(status_code=404, detail="Trabajador no encontrado")
+
+    total = db.query(func.count(Review.id)).filter(Review.trabajador_id == worker.id).scalar() or 0
+    return {
+        "worker_id": str(worker.id),
+        "rating": round(float(worker.rating or 0), 2),
+        "reviews": int(total),
+        "verified": True,
+        "dimensions": {
+            "calidad_trabajo": _avg(db, worker.id, Review.calidad_trabajo),
+            "trato": _avg(db, worker.id, Review.trato),
+            "puntualidad": _avg(db, worker.id, Review.puntualidad),
+            "precio_acordado": _avg(db, worker.id, Review.precio_acordado),
+        },
+    }
