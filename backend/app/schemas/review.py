@@ -3,11 +3,17 @@ from uuid import UUID
 from typing import Optional
 from datetime import datetime
 
+
 class ReviewCreate(BaseModel):
     task_id: UUID
     trabajador_id: UUID
     rating: int = Field(..., ge=1, le=5)
-    comentario: Optional[str] = None
+    calidad_trabajo: Optional[int] = Field(default=None, ge=1, le=5)
+    trato: Optional[int] = Field(default=None, ge=1, le=5)
+    puntualidad: Optional[int] = Field(default=None, ge=1, le=5)
+    precio_acordado: Optional[int] = Field(default=None, ge=1, le=5)
+    comentario: Optional[str] = Field(default=None, max_length=2000)
+
 
 class ReviewResponse(BaseModel):
     id: UUID
@@ -15,5 +21,9 @@ class ReviewResponse(BaseModel):
     cliente_id: UUID
     trabajador_id: UUID
     rating: int
+    calidad_trabajo: Optional[int]
+    trato: Optional[int]
+    puntualidad: Optional[int]
+    precio_acordado: Optional[int]
     comentario: Optional[str]
     created_at: datetime
