@@ -63,6 +63,17 @@ Los anuncios son una entidad comercial independiente. No son tareas ni servicios
 ## Reputación y moderación
 El sistema contempla reseñas posteriores al trabajo, verificación, denuncias y herramientas administrativas. Las experiencias deben asociarse a trabajos reales para evitar que la reputación se convierta en un simple contador de estrellas.
 
+Las reseñas verificadas ahora pueden registrar, además de la valoración general:
+- calidad del trabajo;
+- trato recibido;
+- puntualidad;
+- correspondencia del precio con lo acordado;
+- comentario libre.
+
+La API expone un resumen público multidimensional por trabajador. Las reseñas históricas conservan compatibilidad porque los nuevos criterios son opcionales.
+
+La migración correspondiente está en `backend/migrations/2026-08-17_reviews_multidimensional.sql`.
+
 ## Monetización
 El cobro es agnóstico de pasarela: cada acción crea un registro `Payment` pendiente y un administrador confirma manualmente el pago. El beneficio se activa sólo tras confirmación.
 
@@ -78,14 +89,17 @@ Fuentes actuales:
 - Descubrimiento público y directorio por municipio.
 - Chat y notificaciones push.
 - Límites comerciales comprobados en backend.
+- Moderación con denuncias, ocultación/restauración y suspensión administrativa.
+- Reputación verificada y multidimensional.
 
 ## Próximos pasos
 - Completar UI específica FREE/BASE/PREMIUM.
 - Separar completamente visualización de Necesidades, Servicios y Anuncios.
-- Panel de administración de moderación.
-- Reputación multidimensional y comentarios verificados.
+- Integrar la reputación multidimensional en perfiles y tarjetas públicas.
+- Panel de administración de moderación completo en frontend.
 - Íconos PWA reales.
 - Pasarela de pago real cuando exista una integrable desde Cuba.
+- Pruebas finales de producción: autenticación, publicación, postulación, asignación, reseña, denuncia y pagos.
 
 ## Licencia
 MIT
