@@ -1,40 +1,40 @@
 """
-Un solo lugar para los números del negocio. Cambiarlos aquí no requiere
-tocar los routers.
+Un solo lugar para los números y reglas comerciales de ServiCuba.
 """
 
-# ---------- Plan de trabajador ----------
-# Antes: 3. Se sube a 5 (checklist "Plan ServiCuba Pro": postulaciones
-# ilimitadas "vs. 5 gratis") — el límite gratis y el beneficio premium
-# (ilimitado, ver is_premium_active() más abajo y su uso en
-# routers/applications.py) ya existían por separado; sólo cambia el
-# número del plan gratis.
-PLAN_GRATIS_POSTULACIONES_SEMANA = 5   # None = ilimitado
+# ---------- Planes ----------
+# GRATIS: consumidor/cliente. Puede descubrir y contratar servicios.
+# BASE: profesional. Puede publicar servicios con un límite diario.
+# PREMIUM: profesional con promoción, mayor alcance y límites ampliados.
+PLAN_BASE_SERVICIOS_DIA = 1
+PLAN_PREMIUM_SERVICIOS_DIA = 10
+
+# ---------- Postulaciones ----------
+PLAN_GRATIS_POSTULACIONES_SEMANA = 5   # límite heredado para profesionales sin Premium
+
+# ---------- Descubrimiento ----------
 PLAN_GRATIS_RADIO_MAX_KM = 3.0
 PLAN_PREMIUM_RADIO_MAX_KM = 50.0
 
-PRECIO_SUSCRIPCION_PREMIUM = 5.0       # por ciclo
+# ---------- Suscripción Premium ----------
+PRECIO_SUSCRIPCION_PREMIUM = 5.0
 SUSCRIPCION_PREMIUM_DIAS = 30
 MONEDA_DEFECTO = "USD"
 
-# Prioridad en notificaciones push (checklist "Plan ServiCuba Pro"): al
-# publicarse una tarea nueva, los trabajadores Premium de esa categoría
-# se avisan al instante; los del plan gratis, este número de minutos
-# después — ver services/notificaciones.py. Le da al plan Pro una
-# ventana real de ventaja para postularse antes que nadie.
+# ---------- Prioridad ----------
 PUSH_PRIORIDAD_PREMIUM_MINUTOS = 15
 
-# ---------- Tareas destacadas ----------
+# ---------- Destacados ----------
 PRECIO_TAREA_DESTACADA = 2.0
 TAREA_DESTACADA_DIAS = 7
 
-# ---------- Anuncios de marca ----------
+# ---------- Anuncios Premium ----------
 PRECIO_ANUNCIO_POR_DIA = 3.0
+PLAN_PREMIUM_ANUNCIOS_DIA = 10
 
 
 def is_premium_active(user) -> bool:
-    """Un usuario cuenta como premium sólo si el plan no venció — evita que
-    una suscripción vencida siga dando beneficios indefinidamente."""
+    """True sólo mientras la suscripción Premium esté vigente."""
     from datetime import datetime
     from ..models.user import UserPlan
 
@@ -43,3 +43,23 @@ def is_premium_active(user) -> bool:
     if user.plan_expira is None:
         return False
     return datetime.utcnow() < user.plan_expira
+
+
+def effective_plan(user) -> str:
+    """Devuelve el plan comercial efectivo sin depender del modo activo."""
+    from ..models.user import UserPlan
+
+    if is_premium_active(user):
+        return UserPlan.PREMIUM.value
+    if user.es_trabajador:
+        # Compatibilidad con cuentas antiguas: un trabajador que aún tenga
+        # GRATIS se trata como BASE hasta que se actualice su columna.
+        return UserPlan.BASE.value
+    return UserPlan.GRATIS.value
+
+
+def services_daily_limit(user) -> int:
+    """Límite de publicaciones de servicios del profesional."""
+    if is_premium_active(user):
+        return PLAN_PREMIUM_SERVICIOS_DIA
+    return PLAN_BASE_SERVICIOS_DIA
