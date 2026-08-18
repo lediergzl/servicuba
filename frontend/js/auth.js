@@ -22,12 +22,36 @@ function validateRegistration(data, esTrabajador) {
     return null;
 }
 
+function ensureAuthNavigation() {
+    const addBackLink = (viewId, text) => {
+        const view = document.getElementById(viewId);
+        if (!view || view.querySelector('[data-action="back-home"]')) return;
+        const link = document.createElement('button');
+        link.type = 'button';
+        link.className = 'btn btn-ghost btn-sm auth-back-home';
+        link.dataset.action = 'back-home';
+        link.innerHTML = '<svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M19 12H6M11 6l-6 6 6 6"/></svg>' + text;
+        view.insertBefore(link, view.firstChild);
+    };
+
+    addBackLink('login', 'Volver al inicio');
+    addBackLink('register', 'Volver al inicio');
+
+    document.querySelectorAll('[data-action="back-home"]').forEach(btn => {
+        if (btn.dataset.wired === '1') return;
+        btn.dataset.wired = '1';
+        btn.addEventListener('click', () => showLanding());
+    });
+}
+
 export function initAuth() {
     const registerForm = document.getElementById('registerForm');
     const loginForm = document.getElementById('loginForm');
     const regEsTrabajador = document.getElementById('regEsTrabajador');
     let regLastLat = null;
     let regLastLng = null;
+
+    ensureAuthNavigation();
 
     if (regEsTrabajador) {
         regEsTrabajador.addEventListener('change', (e) => {
@@ -71,7 +95,6 @@ export function initAuth() {
                 notify('Cuenta creada correctamente. Ahora inicia sesión.', 'success');
                 showLogin();
             } catch (err) {
-                // apiFetch already translates FastAPI 422 into the exact field/message.
                 notify(err.message || 'No se pudo crear la cuenta.', 'error');
             } finally {
                 if (submitBtn) {
