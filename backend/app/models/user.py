@@ -44,7 +44,10 @@ class User(Base):
     rating = Column(Float, default=0.0)
     foto = Column(String(255), nullable=True)
     verificado = Column(Boolean, default=False)
-    codigo_verificacion = Column(String(10), nullable=True)
+
+    # Verification codes are stored as bcrypt hashes, not plaintext OTPs.
+    # bcrypt hashes are ~60 characters, so VARCHAR(255) is required.
+    codigo_verificacion = Column(String(255), nullable=True)
     codigo_verificacion_expira = Column(DateTime, nullable=True)
 
     # Password recovery stores a bcrypt hash, not the six-digit code.
