@@ -10,3 +10,9 @@ from .verification import router as verification_router
 from .payments import router as payments_router
 from .ads import router as ads_router
 from .password_reset import router as password_reset_router
+
+# Backwards-compatible API contract used by existing frontend builds.
+# Installing this after importing the task router means /api/tasks/ofertas/nearby
+# is available without duplicating the canonical discovery implementation.
+from .offers_compat import install as install_offers_compat
+install_offers_compat(tasks_router)
