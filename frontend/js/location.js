@@ -8,12 +8,7 @@ function normalizePosition(pos, source) {
     const lat = Number(pos.coords.latitude);
     const lng = Number(pos.coords.longitude);
     if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
-    return {
-        lat,
-        lng,
-        accuracy: pos.coords.accuracy || null,
-        source
-    };
+    return { lat, lng, accuracy: pos.coords.accuracy || null, source };
 }
 
 function saveLocation(location) {
@@ -21,8 +16,7 @@ function saveLocation(location) {
     return location;
 }
 
-// Punto único para GPS web.
-export async function getLocationWithFallback() {
+async function getWebLocation() {
     try {
         const pos = await getGeolocation();
         const location = normalizePosition(pos, pos._servicubaSource || 'gps');
@@ -32,7 +26,7 @@ export async function getLocationWithFallback() {
     }
 }
 
-// Punto único recomendado para TODA la aplicación: APK primero, web después.
+// Punto único recomendado: APK primero, navegador después.
 export async function getBestLocation() {
     if (isNativeApp()) {
         try {
@@ -43,7 +37,13 @@ export async function getBestLocation() {
             console.warn('[ServiCuba] GPS nativo no disponible, usando GPS web:', err);
         }
     }
-    return getLocationWithFallback();
+    return getWebLocation();
+}
+
+// Compatibilidad: todo código existente que ya llamaba esta función obtiene
+// automáticamente el GPS nativo cuando corre dentro de la APK.
+export async function getLocationWithFallback() {
+    return getBestLocation();
 }
 
 export function getSavedLocation() {
