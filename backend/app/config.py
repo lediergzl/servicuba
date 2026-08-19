@@ -15,6 +15,9 @@ class Settings(BaseSettings):
     VAPID_CLAIM_EMAIL: str = "mailto:soporte@servicuba.example"
     ADMIN_PHONE: str | None = None
     ADMIN_PASSWORD: str | None = None
+    CLOUDINARY_CLOUD_NAME: str | None = None
+    CLOUDINARY_API_KEY: str | None = None
+    CLOUDINARY_API_SECRET: str | None = None
 
 
 @lru_cache(maxsize=1)
