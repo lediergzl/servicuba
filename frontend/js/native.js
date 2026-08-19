@@ -1,39 +1,61 @@
-// Puente opcional entre la web ServiCuba y la app Capacitor.
-// La web NO importa paquetes de Capacitor directamente: eso rompería el
-// navegador cuando la web se sirve desde servicuba.onrender.com.
-//
-// La APK puede exponer window.ServiCubaNative con:
-//   geolocation.getCurrentPosition()
-//   push.requestPermission()
-//   push.register()
-//   push.addListener(event, callback)
-//
-// Si el puente no existe, todo cae automáticamente a las APIs web.
+// Adaptador Capacitor para la web remota de ServiCuba.
+// La app usa server.url, por lo que este código NO importa paquetes npm de
+// Capacitor: dentro de la APK accede al bridge global inyectado por Capacitor;
+// en un navegador normal simplemente informa que no hay plataforma nativa.
 
-export function isNativeApp() {
-    return !!window.ServiCubaNative?.isNative;
+function capacitor() {
+    return window.Capacitor || null;
 }
 
-export async function nativeGetCurrentPosition() {
-    const fn = window.ServiCubaNative?.geolocation?.getCurrentPosition;
-    if (!isNativeApp() || typeof fn !== 'function') return null;
-    return fn();
+function plugin(name) {
+    return capacitor()?.Plugins?.[name] || null;
+}
+
+export function isNativeApp() {
+    const cap = capacitor();
+    return !!cap && typeof cap.isNativePlatform === 'function' && cap.isNativePlatform();
+}
+
+export function getNativePlatform() {
+    const cap = capacitor();
+    return typeof cap?.getPlatform === 'function' ? cap.getPlatform() : 'web';
+}
+
+export async function nativeGetCurrentPosition(options = {}) {
+    const geo = plugin('Geolocation');
+    if (!isNativeApp() || !geo?.getCurrentPosition) return null;
+
+    if (geo.requestPermissions) {
+        const permissions = await geo.requestPermissions();
+        const status = permissions?.location || permissions?.coarseLocation;
+        if (status && status !== 'granted') {
+            throw new Error('Permiso de ubicación denegado');
+        }
+    }
+
+    return geo.getCurrentPosition({
+        enableHighAccuracy: true,
+        timeout: 15000,
+        maximumAge: 10000,
+        ...options
+    });
 }
 
 export async function nativeRequestPushPermission() {
-    const fn = window.ServiCubaNative?.push?.requestPermission;
-    if (!isNativeApp() || typeof fn !== 'function') return null;
-    return fn();
+    const push = plugin('PushNotifications');
+    if (!isNativeApp() || !push?.requestPermissions) return null;
+    const result = await push.requestPermissions();
+    return result?.receive || result;
 }
 
 export async function nativeRegisterPush() {
-    const fn = window.ServiCubaNative?.push?.register;
-    if (!isNativeApp() || typeof fn !== 'function') return null;
-    return fn();
+    const push = plugin('PushNotifications');
+    if (!isNativeApp() || !push?.register) return null;
+    return push.register();
 }
 
 export function nativeAddPushListener(event, callback) {
-    const fn = window.ServiCubaNative?.push?.addListener;
-    if (!isNativeApp() || typeof fn !== 'function') return null;
-    return fn(event, callback);
+    const push = plugin('PushNotifications');
+    if (!isNativeApp() || !push?.addListener) return null;
+    return push.addListener(event, callback);
 }
