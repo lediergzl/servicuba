@@ -148,7 +148,7 @@ def get_nearby_tasks(
 
     return [
         {
-            "id": task.id,
+            "id": str(task.id),
             "titulo": task.titulo,
             "precio": task.precio,
             "distancia_km": round(dist / 1000, 2),
@@ -171,13 +171,33 @@ def get_my_tasks(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
+    return _get_my_publications(db, current_user, "necesidad")
+
+
+@router.get("/ofertas/mine")
+def get_my_ofertas(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Servicios publicados por el trabajador autenticado.
+
+    El frontend históricamente consume /tasks/ofertas/mine. Esta ruta debe
+    existir aunque el resto de discovery use /discovery/offers; así evitamos
+    que una publicación válida termine en un 404 al abrir "Mis ofertas".
+    """
+    if not current_user.es_trabajador:
+        raise HTTPException(status_code=403, detail="Activa tu perfil de trabajador para ver tus servicios")
+    return _get_my_publications(db, current_user, "oferta")
+
+
+def _get_my_publications(db: Session, current_user: User, tipo: str):
     from ..models.application import Application, AppStatus
     from ..models.user import User as UserModel
     from ..models.review import Review
 
     tasks = (
         db.query(Task)
-        .filter(Task.cliente_id == current_user.id, Task.tipo == "necesidad")
+        .filter(Task.cliente_id == current_user.id, Task.tipo == tipo)
         .order_by(Task.created_at.desc())
         .all()
     )
@@ -186,21 +206,21 @@ def get_my_tasks(
     publicador_premium = is_premium_active(current_user)
     result = []
     for task in tasks:
-        worker_id = None
-        worker_nombre = None
-        if task.estado.value in ("asignada", "en_proceso", "completada"):
+        cliente_id = None
+        cliente_nombre = None
+        if task.estado.value in ("asignada", "en_proceso", "completada", "confirmada"):
             row = (
                 db.query(UserModel.id, UserModel.nombre)
-                .join(Application, Application.worker_id == UserModel.id)
+                .join(Application, Application.cliente_id == UserModel.id)
                 .filter(Application.task_id == task.id, Application.estado == AppStatus.ACEPTADA)
                 .first()
             )
             if row:
-                worker_id = str(row.id)
-                worker_nombre = row.nombre
+                cliente_id = str(row.id)
+                cliente_nombre = row.nombre
 
         ya_reseniada = False
-        if task.estado.value == "completada":
+        if task.estado.value in ("completada", "confirmada"):
             ya_reseniada = db.query(Review).filter(Review.task_id == task.id).first() is not None
 
         result.append({
@@ -220,8 +240,10 @@ def get_my_tasks(
             ),
             "destacada_hasta": task.destacada_hasta,
             "created_at": task.created_at,
-            "worker_id": worker_id,
-            "worker_nombre": worker_nombre,
+            "worker_id": None,
+            "worker_nombre": None,
+            "cliente_id_asignado": cliente_id,
+            "cliente_nombre": cliente_nombre,
             "ya_reseniada": ya_reseniada,
         })
     return result
