@@ -16,8 +16,8 @@
 [data-navigation-busy="true"] { pointer-events: none !important; }
 @media (min-width: 761px) {
   .app-shell { max-width: 1100px; }
-  .app-main { width: 100%; max-width: 520px; margin-inline: auto; padding-bottom: 24px; }
-  .bottom-nav { display: none !important; }
+  .app-main { width: 100%; max-width: 520px; margin-inline: auto; padding-bottom: 92px; }
+  .bottom-nav { display: flex !important; }
 }
 @media (max-width: 760px) {
   .app-header { position: sticky; }
