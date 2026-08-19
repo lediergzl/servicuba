@@ -57,6 +57,10 @@ export async function apiFetch(path, options = {}) {
     let res;
     try { res = await fetch(url, { ...options, headers }); }
     catch (networkError) {
+        // AbortController is used intentionally by screens that refresh/cancel
+        // stale requests. Cancellation is not a network failure and must not
+        // surface as a misleading connection error.
+        if (networkError?.name === 'AbortError') throw networkError;
         console.error('[ServiCuba API] Network error', { url, options, networkError });
         throw new Error('No se pudo conectar con el servidor. Revisa tu conexión.');
     }
