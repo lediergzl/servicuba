@@ -1,4 +1,4 @@
-import { apiFetch, notify, escapeHtml } from './core.js';
+import { apiFetch, notify, escapeHtml, getGeolocation } from './core.js';
 import { initAuth, showLanding, showRegister, showLogin, logout } from './auth.js';
 import { initTasks, loadCategories, showDashboardCliente, showDashboardTrabajador, switchView } from './tasks.js';
 import { initMap } from './map.js';
@@ -89,6 +89,96 @@ function setAuthUi() {
     document.getElementById('modoSwitch')?.classList.remove('hidden');
 }
 
+async function renderWorkerActivationForm(profile = {}) {
+    const container = document.getElementById('workerActivationSection');
+    if (!container || profile.es_trabajador) {
+        if (container) container.innerHTML = '';
+        return;
+    }
+    container.innerHTML = `
+        <div class="task-card worker-activation-card">
+            <h3 class="task-card__title">👷 Activa tu perfil de trabajador</h3>
+            <p class="view-subtitle">Completa estos datos para poder buscar trabajos y ofrecer tus servicios en ServiCuba.</p>
+            <form id="workerActivationForm" class="stack-md">
+                <select id="workerCategoria" class="field-input" required><option value="">Selecciona tu oficio</option></select>
+                <textarea id="workerDescripcion" class="field-input" rows="3" maxlength="2000" placeholder="Describe brevemente tus servicios"></textarea>
+                <input id="workerPrecioHora" class="field-input" type="number" min="0" step="0.01" placeholder="Precio por hora (CUP)">
+                <input id="workerMunicipio" class="field-input" maxlength="120" placeholder="Municipio" value="${escapeHtml(profile.municipio || '')}">
+                <input id="workerZona" class="field-input" maxlength="120" placeholder="Zona / Consejo popular" value="${escapeHtml(profile.zona || '')}">
+                <button id="workerGpsBtn" type="button" class="btn btn-secondary btn-block">📍 Usar mi ubicación GPS</button>
+                <button type="submit" class="btn btn-accent btn-block">Activar perfil de trabajador</button>
+            </form>
+        </div>`;
+
+    const select = document.getElementById('workerCategoria');
+    try {
+        const categories = await apiFetch('/categories');
+        categories.forEach(cat => {
+            const option = document.createElement('option');
+            option.value = cat.id;
+            option.textContent = `${cat.icono || ''} ${cat.nombre}`.trim();
+            if (String(cat.id) === String(profile.categoria_id || '')) option.selected = true;
+            select.appendChild(option);
+        });
+    } catch (err) {
+        notify('No pudimos cargar los oficios. Inténtalo nuevamente.', 'error');
+        return;
+    }
+
+    let lat = null;
+    let lng = null;
+    document.getElementById('workerGpsBtn')?.addEventListener('click', async () => {
+        const btn = document.getElementById('workerGpsBtn');
+        const original = btn.textContent;
+        btn.disabled = true;
+        btn.textContent = 'Obteniendo ubicación…';
+        try {
+            const pos = await getGeolocation();
+            lat = Number(pos.coords.latitude);
+            lng = Number(pos.coords.longitude);
+            if (!Number.isFinite(lat) || !Number.isFinite(lng)) throw new Error('Coordenadas inválidas');
+            btn.textContent = '✓ Ubicación obtenida';
+            notify('Ubicación GPS obtenida correctamente.', 'success');
+        } catch (err) {
+            btn.textContent = original;
+            notify('No se pudo obtener la ubicación. Puedes continuar sin ella.', 'error');
+        } finally { btn.disabled = false; }
+    });
+
+    document.getElementById('workerActivationForm')?.addEventListener('submit', async e => {
+        e.preventDefault();
+        const form = e.currentTarget;
+        const submit = form.querySelector('button[type="submit"]');
+        const categoria_id = Number(select.value);
+        if (!categoria_id) return notify('Selecciona tu oficio.', 'error');
+        submit.disabled = true;
+        submit.textContent = 'Activando perfil…';
+        try {
+            const updated = await apiFetch('/users/activar-trabajador', {
+                method: 'PUT',
+                body: JSON.stringify({
+                    categoria_id,
+                    descripcion_trabajador: document.getElementById('workerDescripcion').value.trim() || null,
+                    precio_hora: document.getElementById('workerPrecioHora').value ? Number(document.getElementById('workerPrecioHora').value) : null,
+                    municipio: document.getElementById('workerMunicipio').value.trim() || null,
+                    zona: document.getElementById('workerZona').value.trim() || null,
+                    lat,
+                    lng
+                })
+            });
+            syncModeSwitch('trabajador');
+            setCurrentUserId(updated.id || updated.user_id);
+            notify('Perfil de trabajador activado correctamente.', 'success');
+            showDashboardTrabajador();
+        } catch (err) {
+            notify(`No se pudo activar el perfil: ${err.message}`, 'error');
+        } finally {
+            submit.disabled = false;
+            submit.textContent = 'Activar perfil de trabajador';
+        }
+    });
+}
+
 async function openWorkerView() {
     if (!localStorage.getItem('token')) {
         sessionStorage.setItem('servicuba_intent', 'trabajador');
@@ -98,10 +188,10 @@ async function openWorkerView() {
     try {
         const me = await apiFetch('/auth/me');
         if (!me.es_trabajador) {
-            notify('Completa tu perfil de trabajador para acceder a esta sección.', 'info');
             syncModeSwitch('trabajador');
             switchView('perfilView');
             await loadProfileView();
+            notify('Completa tu perfil profesional aquí para activar el modo Trabajador.', 'info');
             return;
         }
         setCurrentUserId(me.id || me.user_id);
@@ -123,6 +213,7 @@ async function loadProfileView() {
         const category = profile.categoria_nombre || profile.categoria || 'Sin oficio configurado';
         const rating = profile.rating != null ? Number(profile.rating).toFixed(1) : '0.0';
         container.innerHTML = `<div class="task-card"><div class="task-card__row"><h3 class="task-card__title">${escapeHtml(profile.nombre || 'Usuario')}</h3><span class="chip">${escapeHtml(role)}</span></div><p class="task-card__meta">${escapeHtml(profile.telefono || '')}</p><p class="task-card__meta">${escapeHtml(category)} · ⭐ ${escapeHtml(rating)}</p>${profile.municipio ? `<p class="task-card__meta">${escapeHtml(profile.municipio)}${profile.zona ? ` · ${escapeHtml(profile.zona)}` : ''}</p>` : ''}${profile.descripcion_trabajador ? `<p>${escapeHtml(profile.descripcion_trabajador)}</p>` : ''}</div>`;
+        await renderWorkerActivationForm(profile);
     } catch (err) {
         container.innerHTML = '<p class="empty-state">No pudimos cargar tu perfil. Inténtalo nuevamente.</p>';
         notify(`No se pudo cargar el perfil: ${err.message}`, 'error');
@@ -170,8 +261,13 @@ function wireGlobalButtons() {
         if (modo === 'trabajador') return openWorkerView();
         if (modo === 'cliente') {
             if (!localStorage.getItem('token')) return showLogin();
-            syncModeSwitch('cliente');
-            showDashboardCliente();
+            try {
+                await apiFetch('/users/modo-activo', { method: 'PUT', body: JSON.stringify({ modo: 'cliente' }) });
+                syncModeSwitch('cliente');
+                showDashboardCliente();
+            } catch (err) {
+                notify(`No se pudo cambiar al modo Cliente: ${err.message}`, 'error');
+            }
         }
     }));
 }
