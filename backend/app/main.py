@@ -3,12 +3,12 @@ import logging
 import time
 from collections import defaultdict, deque
 from pathlib import Path
-from sqlalchemy import text
-from fastapi import FastAPI, Request
+from html import escape
+from fastapi import FastAPI, Request, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import JSONResponse, FileResponse
+from fastapi.responses import JSONResponse, FileResponse, HTMLResponse
 from .routers import auth, users, categories, tasks, applications, reviews, chat, push, native_push, verification, payments, ads, password_reset, task_lifecycle, admin, discovery, dashboard, reports
 from .database import engine, Base, SessionLocal
 from .models.category import Category
@@ -69,7 +69,18 @@ def health():
         with engine.connect() as conn: conn.execute(text("SELECT 1"))
         return {"status": "ok", "database": "ok"}
     except Exception:
-        logger.exception("Health check: database unavailable"); from fastapi import HTTPException; raise HTTPException(status_code=503, detail="Servicio temporalmente no disponible")
+        logger.exception("Health check: database unavailable"); raise HTTPException(status_code=503, detail="Servicio temporalmente no disponible")
+
+SEO_CITIES = {"la-habana": "La Habana", "santiago-de-cuba": "Santiago de Cuba", "holguin": "Holguín", "camaguey": "Camagüey", "santa-clara": "Santa Clara"}
+SEO_SERVICES = {"electricistas": "Electricistas", "plomeros": "Plomeros", "reparadores": "Reparadores", "albaniles": "Albañiles", "pintores": "Pintores"}
+
+@app.get("/servicios/{service}/{city}", response_class=HTMLResponse, include_in_schema=False)
+def public_service_page(service: str, city: str):
+    service_name = SEO_SERVICES.get(service.lower()); city_name = SEO_CITIES.get(city.lower())
+    if not service_name or not city_name: raise HTTPException(status_code=404, detail="Página no encontrada")
+    canonical = f"https://servicuba.onrender.com/servicios/{service}/{city}"
+    return f'''<!doctype html><html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>{escape(service_name)} en {escape(city_name)} | ServiCuba</title><meta name="description" content="Encuentra servicios de {escape(service_name.lower())} en {escape(city_name)}. ServiCuba conecta personas con trabajadores locales."><link rel="canonical" href="{canonical}"><meta property="og:title" content="{escape(service_name)} en {escape(city_name)} | ServiCuba"><meta property="og:description" content="Servicios locales de {escape(service_name.lower())} en {escape(city_name)}."><meta property="og:type" content="website"></head><body><main><h1>{escape(service_name)} en {escape(city_name)}</h1><p>Encuentra y contacta trabajadores locales para servicios de {escape(service_name.lower())} en {escape(city_name)}.</p><p>ServiCuba conecta personas que necesitan un servicio con trabajadores locales.</p><p><a href="/">Volver a ServiCuba</a></p></main></body></html>'''
+
 NOTIFICACIONES_INTERVALO_SEGUNDOS = 60
 async def _bucle_notificaciones_pendientes():
     while True:
@@ -81,11 +92,11 @@ async def _bucle_notificaciones_pendientes():
 async def _iniciar_bucle_notificaciones(): asyncio.create_task(_bucle_notificaciones_pendientes())
 FRONTEND_DIR = Path(__file__).resolve().parent.parent.parent / "frontend"
 PUBLIC_SEO_DIR = Path(__file__).resolve().parent.parent.parent / "public-seo"
-if PUBLIC_SEO_DIR.joinpath("servicios").is_dir():
-    app.mount("/servicios", StaticFiles(directory=PUBLIC_SEO_DIR / "servicios", html=True), name="public-seo-servicios")
 @app.get("/sitemap.xml", include_in_schema=False)
 def public_sitemap():
-    sitemap = PUBLIC_SEO_DIR / "sitemap.xml"
-    if sitemap.is_file(): return FileResponse(sitemap, media_type="application/xml")
-    return JSONResponse(status_code=404, content={"detail": "Sitemap no disponible"})
+    urls = ["https://servicuba.onrender.com/"]
+    for city in SEO_CITIES:
+        for service in SEO_SERVICES: urls.append(f"https://servicuba.onrender.com/servicios/{service}/{city}")
+    xml = '<?xml version="1.0" encoding="UTF-8"?><urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">' + ''.join(f'<url><loc>{u}</loc><changefreq>daily</changefreq><priority>{"1.0" if u.endswith("/") else "0.7"}</priority></url>' for u in urls) + '</urlset>'
+    return HTMLResponse(content=xml, media_type="application/xml")
 if FRONTEND_DIR.is_dir(): app.mount("/", StaticFiles(directory=FRONTEND_DIR, html=True), name="frontend")
