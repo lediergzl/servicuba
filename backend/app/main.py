@@ -80,4 +80,7 @@ async def _bucle_notificaciones_pendientes():
 @app.on_event("startup")
 async def _iniciar_bucle_notificaciones(): asyncio.create_task(_bucle_notificaciones_pendientes())
 FRONTEND_DIR = Path(__file__).resolve().parent.parent.parent / "frontend"
+PUBLIC_SEO_DIR = Path(__file__).resolve().parent.parent.parent / "public-seo"
+if PUBLIC_SEO_DIR.joinpath("servicios").is_dir():
+    app.mount("/servicios", StaticFiles(directory=PUBLIC_SEO_DIR / "servicios", html=True), name="public-seo-servicios")
 if FRONTEND_DIR.is_dir(): app.mount("/", StaticFiles(directory=FRONTEND_DIR, html=True), name="frontend")
