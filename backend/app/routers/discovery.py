@@ -71,8 +71,19 @@ def discover_offers_map(lat: Optional[float] = Query(None), lng: Optional[float]
 
 @router.get("/directory/municipios")
 def directory_municipios(db: Session = Depends(get_db)):
-    rows = (db.query(User.municipio).join(Task, Task.cliente_id == User.id).filter(Task.estado == TaskStatus.ACTIVA, User.municipio.isnot(None)).filter(func.length(func.trim(User.municipio)) >= 2).distinct().order_by(func.lower(User.municipio)).all())
-    return [row[0].strip() for row in rows if row[0] and row[0].strip()]
+    """Return municipalities from active publications, using the task's own location field."""
+    rows = (
+        db.query(Task.municipio)
+        .filter(
+            Task.estado == TaskStatus.ACTIVA,
+            Task.municipio.isnot(None),
+            func.length(func.trim(Task.municipio)) >= 2,
+        )
+        .distinct()
+        .order_by(func.lower(Task.municipio))
+        .all()
+    )
+    return sorted({row[0].strip() for row in rows if row[0] and row[0].strip()}, key=str.casefold)
 
 
 @router.get("/directory")
@@ -80,7 +91,7 @@ def discover_directory(municipio: Optional[str] = Query(None, max_length=100), t
     if not municipio or len(municipio.strip()) < 2:
         return []
     clean_municipio = municipio.strip()
-    query = (db.query(Task, Category.nombre.label("categoria_nombre")).join(User, User.id == Task.cliente_id).outerjoin(Category, Category.id == Task.categoria_id).filter(Task.estado == TaskStatus.ACTIVA, Task.tipo == tipo, func.lower(User.municipio) == func.lower(clean_municipio)))
+    query = (db.query(Task, Category.nombre.label("categoria_nombre")).join(User, User.id == Task.cliente_id).outerjoin(Category, Category.id == Task.categoria_id).filter(Task.estado == TaskStatus.ACTIVA, Task.tipo == tipo, func.lower(Task.municipio) == func.lower(clean_municipio)))
     if category_id:
         query = query.filter(Task.categoria_id == category_id)
     rows = query.order_by(Task.destacada.desc(), Task.created_at.desc()).limit(50).all()
