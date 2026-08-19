@@ -4,11 +4,12 @@ import time
 from collections import defaultdict, deque
 from pathlib import Path
 from html import escape
+from sqlalchemy import text
 from fastapi import FastAPI, Request, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import JSONResponse, FileResponse, HTMLResponse
+from fastapi.responses import JSONResponse, HTMLResponse
 from .routers import auth, users, categories, tasks, applications, reviews, chat, push, native_push, verification, payments, ads, password_reset, task_lifecycle, admin, discovery, dashboard, reports
 from .database import engine, Base, SessionLocal
 from .models.category import Category
@@ -91,7 +92,6 @@ async def _bucle_notificaciones_pendientes():
 @app.on_event("startup")
 async def _iniciar_bucle_notificaciones(): asyncio.create_task(_bucle_notificaciones_pendientes())
 FRONTEND_DIR = Path(__file__).resolve().parent.parent.parent / "frontend"
-PUBLIC_SEO_DIR = Path(__file__).resolve().parent.parent.parent / "public-seo"
 @app.get("/sitemap.xml", include_in_schema=False)
 def public_sitemap():
     urls = ["https://servicuba.onrender.com/"]
