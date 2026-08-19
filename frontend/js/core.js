@@ -14,8 +14,40 @@ export function escapeHtml(str) {
     return div.innerHTML;
 }
 
+// Entitlements que puede asumir una persona sin sesión. La landing y las
+// rutas públicas pueden consultar permisos para decidir qué CTA mostrar,
+// pero no deben provocar un GET protegido ni un falso "sesión expirada".
+function getAnonymousEntitlements() {
+    return {
+        plan: 'gratis',
+        plan_expira: null,
+        es_cliente: false,
+        es_trabajador: false,
+        can_discover: true,
+        can_contact: false,
+        can_apply: false,
+        can_publish_need: false,
+        can_publish_service: false,
+        services_daily_limit: 0,
+        max_radius_km: null,
+        can_publish_ads: false,
+        ads_daily_limit: 0,
+        priority_notifications: false,
+        anonymous: true
+    };
+}
+
 export async function apiFetch(path, options = {}) {
     const token = localStorage.getItem('token');
+    const method = (options.method || 'GET').toUpperCase();
+
+    // /users/entitlements describe permisos de la UI. Antes se llamaba al
+    // arrancar incluso sin sesión, generando un 401 visible en consola.
+    // Para visitantes devolvemos el estado FREE local sin tocar el backend.
+    if (!token && method === 'GET' && path === '/users/entitlements') {
+        return getAnonymousEntitlements();
+    }
+
     const headers = {
         ...(options.body ? { 'Content-Type': 'application/json' } : {}),
         ...(token ? { Authorization: `Bearer ${token}` } : {}),
@@ -29,9 +61,14 @@ export async function apiFetch(path, options = {}) {
         throw new Error('No se pudo conectar con el servidor. Revisa tu conexión.');
     }
     if (res.status === 401) {
-        localStorage.removeItem('token');
-        notify('Tu sesión expiró. Inicia sesión de nuevo.', 'error');
-        document.dispatchEvent(new CustomEvent('auth:expired'));
+        // Sólo una petición que realmente llevaba sesión puede significar
+        // "sesión expirada". Las rutas públicas/anonymous no deben borrar
+        // estado ni mostrar ese mensaje por un 401 ajeno.
+        if (token) {
+            localStorage.removeItem('token');
+            notify('Tu sesión expiró. Inicia sesión de nuevo.', 'error');
+            document.dispatchEvent(new CustomEvent('auth:expired'));
+        }
         throw new Error('No autorizado');
     }
     let data = null;
@@ -40,7 +77,7 @@ export async function apiFetch(path, options = {}) {
     if (!res.ok) {
         const detail = data?.detail;
         const validation = Array.isArray(detail) ? detail.map(item => ({ location: item.loc?.join('.') || 'unknown', message: item.msg, type: item.type, input: item.input })) : null;
-        console.error('[ServiCuba API] Request failed', { url, status: res.status, method: options.method || 'GET', response: data, validation, requestBody: options.body || null });
+        console.error('[ServiCuba API] Request failed', { url, status: res.status, method, response: data, validation, requestBody: options.body || null });
         if (res.status === 422 && validation?.length) throw new Error(`Solicitud inválida en ${validation.map(v => `${v.location}: ${v.message}`).join('; ')}`);
         throw new Error(typeof detail === 'string' ? detail : `Error ${res.status}`);
     }
