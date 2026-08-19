@@ -46,13 +46,18 @@ class User(Base):
     verificado = Column(Boolean, default=False)
 
     # Verification codes are stored as bcrypt hashes, not plaintext OTPs.
-    # bcrypt hashes are ~60 characters, so VARCHAR(255) is required.
     codigo_verificacion = Column(String(255), nullable=True)
     codigo_verificacion_expira = Column(DateTime, nullable=True)
 
     # Password recovery stores a bcrypt hash, not the six-digit code.
     codigo_reset_password = Column(String(255), nullable=True)
     codigo_reset_password_expira = Column(DateTime, nullable=True)
+
+    # Account-level brute-force protection. These values survive process restarts
+    # and complement the IP-based middleware limiter.
+    login_failed_attempts = Column(Integer, default=0, nullable=False)
+    login_locked_until = Column(DateTime, nullable=True)
+    login_last_failed_at = Column(DateTime, nullable=True)
 
     plan = Column(Enum(UserPlan), default=UserPlan.GRATIS, nullable=False)
     plan_expira = Column(DateTime, nullable=True)
