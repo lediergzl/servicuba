@@ -32,6 +32,19 @@ def _accepted_application(db: Session, task_id: UUID) -> Application:
     return app
 
 
+def _participants(task: Task, app: Application) -> tuple:
+    """Return (worker_id, client_id) for either marketplace direction.
+
+    necesidad: the publisher is the client and the accepted applicant is the worker.
+    oferta: the publisher is the worker and the accepted applicant is the client.
+    Keeping this mapping in one place prevents start/complete/confirm from
+    drifting into different role rules.
+    """
+    if task.tipo == "oferta":
+        return task.cliente_id, app.worker_id
+    return app.worker_id, task.cliente_id
+
+
 def _perform_transition(task: Task, action: LifecycleAction) -> None:
     try:
         task.estado = TaskStatus(transition(task.estado.value, action))
@@ -46,9 +59,9 @@ def _perform_transition(task: Task, action: LifecycleAction) -> None:
 def start_task(task_id: UUID, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     task = _locked_task(db, task_id)
     app = _accepted_application(db, task_id)
-    worker_id = app.worker_id if task.tipo != "oferta" else task.cliente_id
+    worker_id, _client_id = _participants(task, app)
     if worker_id != current_user.id:
-        raise HTTPException(status_code=403, detail="Sólo el trabajador asignado puede iniciar el servicio")
+        raise HTTPException(status_code=403, detail="Sólo el trabajador responsable puede iniciar el servicio")
     _perform_transition(task, LifecycleAction.START)
     db.commit()
     db.refresh(task)
@@ -59,9 +72,14 @@ def start_task(task_id: UUID, db: Session = Depends(get_db), current_user: User 
 def complete_task_lifecycle(task_id: UUID, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     task = _locked_task(db, task_id)
     app = _accepted_application(db, task_id)
-    worker_id = app.worker_id if task.tipo != "oferta" else task.cliente_id
+    worker_id, client_id = _participants(task, app)
     if worker_id != current_user.id:
-        raise HTTPException(status_code=403, detail="Sólo el trabajador responsable puede finalizar el servicio")
+        if client_id == current_user.id:
+            raise HTTPException(
+                status_code=403,
+                detail="El trabajador responsable debe marcar primero el servicio como finalizado. Después podrás confirmarlo.",
+            )
+        raise HTTPException(status_code=403, detail="No formas parte de este servicio")
     _perform_transition(task, LifecycleAction.COMPLETE)
     db.commit()
     db.refresh(task)
@@ -72,7 +90,7 @@ def complete_task_lifecycle(task_id: UUID, db: Session = Depends(get_db), curren
 def confirm_task(task_id: UUID, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     task = _locked_task(db, task_id)
     app = _accepted_application(db, task_id)
-    client_id = task.cliente_id if task.tipo != "oferta" else app.worker_id
+    _worker_id, client_id = _participants(task, app)
     if client_id != current_user.id:
         raise HTTPException(status_code=403, detail="Sólo el cliente puede confirmar el servicio")
     _perform_transition(task, LifecycleAction.CONFIRM)
@@ -85,9 +103,6 @@ def confirm_task(task_id: UUID, db: Session = Depends(get_db), current_user: Use
 def cancel_task_lifecycle(task_id: UUID, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     task = _locked_task(db, task_id)
 
-    # COMPLETADA is terminal with respect to cancellation. Reject before
-    # querying applications because no application is needed to determine
-    # that this transition is invalid.
     if task.estado == TaskStatus.COMPLETADA:
         raise HTTPException(status_code=409, detail="El servicio ya fue completado y no puede cancelarse")
 
@@ -100,15 +115,12 @@ def cancel_task_lifecycle(task_id: UUID, db: Session = Depends(get_db), current_
             raise HTTPException(status_code=403, detail="Sólo el publicador puede cancelar una publicación activa")
     elif task.estado in (TaskStatus.ASIGNADA, TaskStatus.EN_PROCESO):
         assert app is not None
-        if current_user.id not in {task.cliente_id, app.worker_id}:
+        worker_id, client_id = _participants(task, app)
+        if current_user.id not in {worker_id, client_id}:
             raise HTTPException(status_code=403, detail="No formas parte de este servicio")
     else:
         raise HTTPException(status_code=409, detail="El servicio ya no puede cancelarse")
 
-    # Once a publication is cancelled, no pending application may remain
-    # actionable. Mark them rejected in the same transaction as the task
-    # transition, so readers never observe a cancellable task with live
-    # pending applications.
     if task.estado == TaskStatus.ACTIVA:
         pending = (
             db.query(Application)
