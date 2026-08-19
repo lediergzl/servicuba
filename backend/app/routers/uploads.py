@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, Query
+from ..services.auth import get_current_user
 from ..services.cloudinary import create_upload_signature
-from ..utils.auth import get_current_user
 from ..models.user import User
 
 router = APIRouter()
