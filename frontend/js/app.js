@@ -84,6 +84,7 @@ async function openWorkerView() {
         if (!me.es_trabajador) {
             notify('Completa tu perfil de trabajador para acceder a esta sección.', 'info');
             switchView('perfilView');
+            await loadProfileView();
             return;
         }
         setCurrentUserId(me.id || me.user_id);
@@ -167,6 +168,14 @@ function wireGlobalButtons() {
         if (view === 'dashboardTrabajador') return openWorkerView();
         return switchView(view);
     }));
+    document.querySelectorAll('[data-modo]').forEach(btn => btn.addEventListener('click', async () => {
+        const modo = btn.dataset.modo;
+        if (modo === 'trabajador') return openWorkerView();
+        if (modo === 'cliente') {
+            if (!localStorage.getItem('token')) return showLogin();
+            showDashboardCliente();
+        }
+    }));
 }
 
 async function restoreSession() {
@@ -190,9 +199,9 @@ async function boot() {
     try { initTasks(); } catch (err) { console.error('initTasks', err); }
     try { initChat(); } catch (err) { console.error('initChat', err); }
     try { initMap(); } catch (err) { console.error('initMap', err); }
-    try { initVerification(); } catch (err) { console.error('initVerification', err); }
-    try { initPush(); } catch (err) { console.error('initPush', err); }
-    try { initSponsorAdEntry(); } catch (err) { console.error('initSponsorAdEntry', err); }
+    try { initVerification(); } catch (err) { console.error('verification', err); }
+    try { initPush(); } catch (err) { console.error('push', err); }
+    try { initSponsorAdEntry(); } catch (err) { console.error('ads', err); }
     wireGlobalButtons();
     try { await loadCategories(); } catch (err) { console.error('loadCategories', err); }
     const restored = await restoreSession(); if (!restored) showLanding();
