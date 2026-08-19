@@ -1,6 +1,7 @@
 from typing import Optional
-
+import re
 from fastapi import APIRouter, Depends, Query
+from fastapi.responses import HTMLResponse
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
@@ -14,7 +15,6 @@ router = APIRouter()
 
 
 def _public_items(items: list[dict]) -> list[dict]:
-    """Remove identifiers and exact coordinates from unauthenticated results."""
     safe = []
     for item in items:
         safe.append({"id": item["id"], "titulo": item["titulo"], "descripcion": item.get("descripcion"), "precio": item.get("precio"), "distancia_km": item.get("distancia_km"), "categoria_id": item.get("categoria_id"), "estado": item.get("estado"), "tipo": item.get("tipo"), "destacada": item.get("destacada", False), "created_at": item.get("created_at"), **({"disponible_ahora": item["disponible_ahora"]} if "disponible_ahora" in item else {})})
@@ -32,6 +32,13 @@ def _public_map_items(items: list[dict]) -> list[dict]:
 
 def _valid_coordinates(lat: Optional[float], lng: Optional[float]) -> bool:
     return lat is not None and lng is not None and -90 <= lat <= 90 and -180 <= lng <= 180
+
+
+def _slug(value: str) -> str:
+    value = value.lower().strip()
+    value = value.replace("ñ", "n")
+    value = re.sub(r"[^a-z0-9]+", "-", value)
+    return value.strip("-")
 
 
 @router.get("/tasks")
@@ -64,7 +71,6 @@ def discover_offers_map(lat: Optional[float] = Query(None), lng: Optional[float]
 
 @router.get("/directory/municipios")
 def directory_municipios(db: Session = Depends(get_db)):
-    """Public list of municipalities that currently have active publications."""
     rows = (db.query(User.municipio).join(Task, Task.cliente_id == User.id).filter(Task.estado == TaskStatus.ACTIVA, User.municipio.isnot(None)).filter(func.length(func.trim(User.municipio)) >= 2).distinct().order_by(func.lower(User.municipio)).all())
     return [row[0].strip() for row in rows if row[0] and row[0].strip()]
 
@@ -85,3 +91,19 @@ def discover_directory(municipio: Optional[str] = Query(None, max_length=100), t
 def recent_activity(limit: int = Query(6, ge=1, le=12), db: Session = Depends(get_db)):
     rows = (db.query(Task, Category.nombre.label("categoria_nombre"), Category.icono.label("categoria_icono")).outerjoin(Category, Category.id == Task.categoria_id).filter(Task.estado == TaskStatus.ACTIVA).order_by(Task.created_at.desc()).limit(limit).all())
     return [{"id": str(task.id), "titulo": task.titulo, "tipo": task.tipo, "categoria_nombre": categoria_nombre, "categoria_icono": categoria_icono, "municipio": task.municipio, "created_at": task.created_at.isoformat() if task.created_at else None} for task, categoria_nombre, categoria_icono in rows]
+
+
+@router.get("/seo/servicios/{service_slug}/{city_slug}", response_class=HTMLResponse, include_in_schema=False)
+def seo_service_page(service_slug: str, city_slug: str, db: Session = Depends(get_db)):
+    """Crawlable public HTML for service + city searches; no JS/auth required."""
+    category = next((c for c in db.query(Category).filter(Category.activo.is_(True)).all() if _slug(c.nombre) == service_slug.rstrip("s")), None)
+    city_name = city_slug.replace("-", " ").title()
+    if city_slug == "la-habana": city_name = "La Habana"
+    if city_slug == "santiago-de-cuba": city_name = "Santiago de Cuba"
+    service_name = category.nombre if category else service_slug.replace("-", " ").title()
+    count = 0
+    if category:
+        count = db.query(Task).join(User, User.id == Task.cliente_id).filter(Task.estado == TaskStatus.ACTIVA, Task.tipo == "oferta", Task.categoria_id == category.id, func.lower(User.municipio) == func.lower(city_name)).count()
+    title = f"{service_name} en {city_name} | ServiCuba"
+    description = f"Encuentra servicios de {service_name.lower()} en {city_name}. ServiCuba conecta personas con trabajadores locales."
+    return f'''<!doctype html><html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>{title}</title><meta name="description" content="{description}"><link rel="canonical" href="https://servicuba.onrender.com/servicios/{service_slug}/{city_slug}"><meta property="og:title" content="{title}"><meta property="og:description" content="{description}"></head><body><main><h1>{service_name} en {city_name}</h1><p>{description}</p><p>Hay actualmente {count} publicación(es) activa(s) de este servicio en este municipio.</p><p>Busca trabajadores, compara opciones y contacta directamente a quien pueda ayudarte.</p><p><a href="/">Volver a ServiCuba</a></p></main></body></html>'''
