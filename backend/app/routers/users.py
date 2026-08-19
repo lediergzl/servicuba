@@ -16,7 +16,6 @@ router = APIRouter()
 def get_profile(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     return build_user_response(db, current_user)
 
-
 @router.get("/entitlements")
 def get_entitlements(current_user: User = Depends(get_current_user)):
     """Fuente única de permisos comerciales para el frontend.
@@ -28,7 +27,6 @@ def get_entitlements(current_user: User = Depends(get_current_user)):
     plan = effective_plan(current_user)
     premium = is_premium_active(current_user)
     is_professional = plan in (UserPlan.BASE.value, UserPlan.PREMIUM.value)
-
     return {
         "plan": plan,
         "plan_expira": current_user.plan_expira.isoformat() if current_user.plan_expira else None,
@@ -46,29 +44,27 @@ def get_entitlements(current_user: User = Depends(get_current_user)):
         "priority_notifications": premium,
     }
 
-
 @router.put("/activar-trabajador", response_model=UserResponse)
 def activar_trabajador(body: ActivarTrabajadorRequest, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
-    categoria = db.query(Category).filter(Category.id == body.categoria_id).first()
+    categoria = db.query(Category).filter(Category.id == body.categoria_id, Category.activo.is_(True)).first()
     if not categoria:
         raise HTTPException(status_code=400, detail="Categoría inválida")
 
     current_user.es_trabajador = True
     current_user.categoria_id = body.categoria_id
-    current_user.descripcion_trabajador = body.descripcion_trabajador
+    current_user.descripcion_trabajador = body.descripcion_trabajador.strip() if body.descripcion_trabajador else None
     current_user.precio_hora = body.precio_hora
-    if body.municipio is not None: current_user.municipio = body.municipio
-    if body.zona is not None: current_user.zona = body.zona
+    if body.municipio is not None: current_user.municipio = body.municipio.strip() or None
+    if body.zona is not None: current_user.zona = body.zona.strip() or None
     if body.lat is not None: current_user.lat = body.lat
     if body.lng is not None: current_user.lng = body.lng
-
     if current_user.plan == UserPlan.GRATIS:
         current_user.plan = UserPlan.BASE
+    current_user.modo_activo = "trabajador"
 
     db.commit()
     db.refresh(current_user)
     return build_user_response(db, current_user)
-
 
 @router.put("/modo-activo", response_model=UserResponse)
 def cambiar_modo_activo(body: ModoActivoRequest, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
@@ -83,13 +79,11 @@ def cambiar_modo_activo(body: ModoActivoRequest, db: Session = Depends(get_db), 
     db.refresh(current_user)
     return build_user_response(db, current_user)
 
-
 @router.get("/stats/workers-count")
 def workers_count(db: Session = Depends(get_db)):
     total = db.query(User).filter(User.es_trabajador == True).count()  # noqa: E712
     rows = db.query(User.categoria_id, func.count(User.id)).filter(User.es_trabajador == True, User.categoria_id.isnot(None)).group_by(User.categoria_id).all()
     return {"total": total, "por_categoria": {str(cat_id): count for cat_id, count in rows}}
-
 
 @router.get("/admin/list")
 def list_users_admin(q: Optional[str] = None, db: Session = Depends(get_db), _admin: User = Depends(get_current_admin)):
@@ -99,7 +93,6 @@ def list_users_admin(q: Optional[str] = None, db: Session = Depends(get_db), _ad
         query = query.filter((User.nombre.ilike(like)) | (User.telefono.ilike(like)))
     users = query.order_by(User.created_at.desc()).limit(200).all()
     return [{"id": str(u.id), "nombre": u.nombre, "telefono": u.telefono, "es_cliente": u.es_cliente, "es_trabajador": u.es_trabajador, "es_admin": u.es_admin, "verificado": u.verificado, "plan": effective_plan(u), "rating": u.rating or 0.0, "categoria_id": u.categoria_id, "created_at": u.created_at.isoformat() if u.created_at else None} for u in users]
-
 
 @router.post("/admin/{user_id}/toggle-verificado")
 def toggle_verificado_admin(user_id: str, db: Session = Depends(get_db), _admin: User = Depends(get_current_admin)):
