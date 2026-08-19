@@ -1,32 +1,30 @@
-import { apiFetch, escapeHtml, notify } from './core.js';
+import { apiFetch, escapeHtml, notify, showFormModal } from './core.js';
 
+let directoryObserver = null;
+function hideDirectory(){ document.getElementById('municipioDirectory')?.classList.add('hidden'); }
+function watchOtherViews(){
+    if(directoryObserver) return;
+    directoryObserver=new MutationObserver(()=>{
+        const dir=document.getElementById('municipioDirectory'); if(!dir || dir.classList.contains('hidden')) return;
+        const another=[...document.querySelectorAll('.view')].some(v=>v!==dir && !v.classList.contains('hidden'));
+        if(another) dir.classList.add('hidden');
+    });
+    directoryObserver.observe(document.getElementById('views')||document.body,{subtree:true,attributes:true,attributeFilter:['class']});
+}
 function ensureDirectoryView() {
-    let view = document.getElementById('municipioDirectory');
-    if (view) return view;
-    const main = document.getElementById('views');
-    if (!main) return null;
-    view = document.createElement('section'); view.id='municipioDirectory'; view.className='view hidden directory-view';
+    let view=document.getElementById('municipioDirectory'); if(view) return view;
+    const main=document.getElementById('views'); if(!main) return null;
+    view=document.createElement('section'); view.id='municipioDirectory'; view.className='view hidden directory-view';
     view.innerHTML=`<div class="view-header-row"><div><h2 class="view-title">Trabajadores por municipio</h2><p class="view-subtitle">Encuentra trabajadores con perfil profesional activo.</p></div><button id="directoryBackBtn" class="btn btn-ghost btn-sm" type="button">Atrás</button></div><div class="directory-controls"><select id="directoryMunicipio" class="field-input"><option value="">Cargando municipios…</option></select></div><div id="directoryResults" class="stack-sm"></div>`;
-    main.appendChild(view);
+    main.appendChild(view); watchOtherViews();
     view.querySelector('#directoryMunicipio').addEventListener('change',loadDirectoryResults);
-    view.querySelector('#directoryBackBtn').addEventListener('click',()=>{view.classList.add('hidden');document.getElementById('landing')?.classList.remove('hidden');});
+    view.querySelector('#directoryBackBtn').addEventListener('click',()=>{hideDirectory();document.getElementById('landing')?.classList.remove('hidden');});
+    view.querySelector('#directoryResults').addEventListener('click',async e=>{const card=e.target.closest('[data-worker-id]');if(card) await openWorkerProfile(card.dataset.workerId);});
     return view;
 }
-
 export async function openMunicipioDirectory(){const view=ensureDirectoryView();if(!view)return;document.querySelectorAll('.view').forEach(v=>v.classList.add('hidden'));view.classList.remove('hidden');await loadMunicipios();}
-
-async function loadMunicipios(){
-    const select=document.getElementById('directoryMunicipio'),list=document.getElementById('directoryResults');if(!select||!list)return;
-    list.innerHTML='<p class="view-subtitle">Cargando trabajadores…</p>';
-    try{const municipios=await apiFetch('/discovery/directory/municipios');select.innerHTML='<option value="">Selecciona un municipio</option>'+municipios.map(m=>`<option value="${escapeHtml(m)}">${escapeHtml(m)}</option>`).join('');if(municipios.length){select.value=municipios[0];await loadDirectoryResults();}else list.innerHTML='<p class="view-subtitle">Todavía no hay trabajadores con perfil activo.</p>';}catch(err){list.innerHTML='<p class="view-subtitle">No pudimos cargar los municipios. Inténtalo de nuevo.</p>';notify('No se pudo cargar el directorio.','error');}
-}
-
-async function loadDirectoryResults(){
-    const select=document.getElementById('directoryMunicipio'),list=document.getElementById('directoryResults');if(!select||!list||!select.value)return;
-    list.innerHTML='<p class="view-subtitle">Buscando trabajadores…</p>';
-    try{const items=await apiFetch(`/discovery/directory?municipio=${encodeURIComponent(select.value)}`);if(!items.length){list.innerHTML='<p class="view-subtitle">No hay trabajadores disponibles en este municipio.</p>';return;}
-    list.innerHTML=items.map(item=>`<article class="directory-item"><div class="directory-item__top"><strong>${escapeHtml(item.nombre||'Trabajador')}</strong>${item.verificado?'<span>✓ Verificado</span>':''}</div>${item.categoria_nombre?`<p>${escapeHtml(item.categoria_icono||'🛠')} ${escapeHtml(item.categoria_nombre)}</p>`:''}${item.descripcion_trabajador?`<p>${escapeHtml(item.descripcion_trabajador)}</p>`:''}<div class="directory-item__meta"><span>⭐ ${Number(item.rating||0).toFixed(1)}</span>${item.precio_hora!=null?`<span>${escapeHtml(String(item.precio_hora))} CUP/h</span>`:''}${item.zona?`<span>${escapeHtml(item.zona)}</span>`:''}</div></article>`).join('');
-    }catch(err){list.innerHTML='<p class="view-subtitle">No pudimos cargar los trabajadores.</p>';}
-}
-
+async function loadMunicipios(){const select=document.getElementById('directoryMunicipio'),list=document.getElementById('directoryResults');if(!select||!list)return;list.innerHTML='<p class="view-subtitle">Cargando trabajadores…</p>';try{const municipios=await apiFetch('/discovery/directory/municipios');select.innerHTML='<option value="">Selecciona un municipio</option>'+municipios.map(m=>`<option value="${escapeHtml(m)}">${escapeHtml(m)}</option>`).join('');if(municipios.length){select.value=municipios[0];await loadDirectoryResults();}else list.innerHTML='<p class="view-subtitle">Todavía no hay trabajadores con perfil activo.</p>';}catch(err){list.innerHTML='<p class="view-subtitle">No pudimos cargar los municipios. Inténtalo de nuevo.</p>';notify('No se pudo cargar el directorio.','error');}}
+async function loadDirectoryResults(){const select=document.getElementById('directoryMunicipio'),list=document.getElementById('directoryResults');if(!select||!list||!select.value)return;list.innerHTML='<p class="view-subtitle">Buscando trabajadores…</p>';try{const items=await apiFetch(`/discovery/directory?municipio=${encodeURIComponent(select.value)}`);if(!items.length){list.innerHTML='<p class="view-subtitle">No hay trabajadores disponibles en este municipio.</p>';return;}list.innerHTML=items.map(item=>`<article class="directory-item" data-worker-id="${escapeHtml(String(item.id))}" role="button" tabindex="0"><div class="directory-item__top"><strong>${escapeHtml(item.nombre||'Trabajador')}</strong>${item.verificado?'<span>✓ Verificado</span>':''}</div>${item.categoria_nombre?`<p>${escapeHtml(item.categoria_icono||'🛠')} ${escapeHtml(item.categoria_nombre)}</p>`:''}${item.descripcion_trabajador?`<p>${escapeHtml(item.descripcion_trabajador)}</p>`:''}<div class="directory-item__meta"><span>⭐ ${Number(item.rating||0).toFixed(1)}</span>${item.precio_hora!=null?`<span>${escapeHtml(String(item.precio_hora))} CUP/h</span>`:''}${item.zona?`<span>${escapeHtml(item.zona)}</span>`:''}</div><span class="directory-item__action">Ver perfil →</span></article>`).join('');}catch(err){list.innerHTML='<p class="view-subtitle">No pudimos cargar los trabajadores.</p>';}}
+async function openWorkerProfile(id){try{const w=await apiFetch(`/users/public/${encodeURIComponent(id)}`);await showFormModal({title:w.nombre||'Perfil del trabajador',confirmLabel:'Cerrar',fields:[],message:`${w.verificado?'✓ Cuenta verificada\n':''}${w.categoria_icono||'🛠'} ${w.categoria_nombre||'Profesional'}\n\n${w.descripcion_trabajador||'Sin descripción profesional.'}\n\n⭐ ${Number(w.rating||0).toFixed(1)}${w.precio_hora!=null?`\n💰 ${w.precio_hora} CUP/h`:''}${w.municipio?`\n📍 ${w.municipio}${w.zona?` · ${w.zona}`:''}`:''}`});}catch(err){notify('No se pudo cargar el perfil del trabajador.','error');}}
 export function initDirectory(){ensureDirectoryView();}
+export { hideDirectory };
