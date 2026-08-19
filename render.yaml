@@ -8,8 +8,10 @@ services:
   - type: web
     name: servicios-api
     runtime: python
-    buildCommand: python frontend/seo/generate_pages.py && rm -rf frontend/servicios && cp -r public-seo/servicios frontend/servicios && cp public-seo/sitemap.xml frontend/sitemap.xml && pip install -r backend/requirements.txt
-    startCommand: alembic -c backend/alembic.ini upgrade head && uvicorn backend.app.main:app --host 0.0.0.0 --port $PORT
+    buildCommand: python frontend/seo/generate_pages.py && rm -rf frontend/servicios && cp -r public-seo/servicios frontend/servicios && cp public-seo/sitemap.xml frontend/sitemap.xml && pip install -r backend/requirements.txt && alembic -c backend/alembic.ini upgrade head
+    # Render Free no dispone de preDeployCommand; las migraciones se ejecutan
+    # al final del build, antes de iniciar la aplicación.
+    startCommand: uvicorn backend.app.main:app --host 0.0.0.0 --port $PORT
     envVars:
       - key: DATABASE_URL
         sync: false
