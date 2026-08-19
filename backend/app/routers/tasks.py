@@ -27,90 +27,50 @@ router = APIRouter()
 
 
 def _publicaciones_hoy(db: Session, user_id: UUID, tipo: str) -> int:
-    """Cuenta publicaciones del usuario desde medianoche UTC."""
     inicio = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
     return (
         db.query(func.count(Task.id))
-        .filter(
-            Task.cliente_id == user_id,
-            Task.tipo == tipo,
-            Task.created_at >= inicio,
-        )
-        .scalar()
-        or 0
+        .filter(Task.cliente_id == user_id, Task.tipo == tipo, Task.created_at >= inicio)
+        .scalar() or 0
     )
 
 
 def _validar_permiso_publicacion(db: Session, user: User, tipo: str = "necesidad") -> str:
-    """La UI nunca es la autoridad: el plan se valida aquí antes de escribir.
-
-    FREE descubre, contacta y contrata, pero no publica. BASE y PREMIUM
-    pueden publicar dentro de su cuota diaria.
-    """
     plan = effective_plan(user)
     if plan == UserPlan.GRATIS.value:
-        raise HTTPException(
-            status_code=403,
-            detail="Tu plan FREE permite buscar y contratar servicios. Actualiza a BASE para publicar.",
-        )
-
+        raise HTTPException(status_code=403, detail="Tu plan FREE permite buscar y contratar servicios. Actualiza a BASE para publicar.")
     limite = services_daily_limit(user)
     usados = _publicaciones_hoy(db, user.id, tipo)
     if usados >= limite:
         nombre = "Premium" if plan == UserPlan.PREMIUM.value else "Base"
-        raise HTTPException(
-            status_code=429,
-            detail=f"Alcanzaste el límite diario de {limite} publicación(es) de tu plan {nombre}.",
-        )
+        raise HTTPException(status_code=429, detail=f"Alcanzaste el límite diario de {limite} publicación(es) de tu plan {nombre}.")
     return plan
 
 
 @router.post("", response_model=TaskResponse)
-def create_task(
-    task: TaskCreate,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
-):
+def create_task(task: TaskCreate, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     if not current_user.es_cliente:
         raise HTTPException(status_code=403, detail="Activa tu perfil de cliente para crear tareas")
-
     _validar_permiso_publicacion(db, current_user, "necesidad")
-
     point = ST_SetSRID(ST_MakePoint(task.lng, task.lat), 4326)
     db_task = Task(
-        cliente_id=current_user.id,
-        categoria_id=task.categoria_id,
-        titulo=task.titulo,
-        descripcion=task.descripcion,
-        precio=task.precio,
-        ubicacion=point,
-        municipio=task.municipio,
-        zona=task.zona,
-        referencia=task.referencia,
-        estado=TaskStatus.ACTIVA,
-        tipo="necesidad",
+        cliente_id=current_user.id, categoria_id=task.categoria_id, titulo=task.titulo,
+        descripcion=task.descripcion, precio=task.precio, ubicacion=point,
+        municipio=task.municipio, zona=task.zona, referencia=task.referencia,
+        estado=TaskStatus.ACTIVA, tipo="necesidad",
     )
     db.add(db_task)
     db.commit()
     db.refresh(db_task)
-
     try:
         notificar_nuevos_trabajadores_cercanos(db, db_task, task.lat, task.lng)
     except Exception:
         logger.warning("No se pudo notificar a trabajadores cercanos de la tarea %s", db_task.id, exc_info=True)
-
     return db_task
 
 
 @router.get("/nearby")
-def get_nearby_tasks(
-    lat: float = Query(...),
-    lng: float = Query(...),
-    radius_km: float = Query(3.0, ge=0.1, le=50),
-    category_id: Optional[int] = None,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
-):
+def get_nearby_tasks(lat: float = Query(...), lng: float = Query(...), radius_km: float = Query(3.0, ge=0.1, le=50), category_id: Optional[int] = None, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     radio_max = PLAN_PREMIUM_RADIO_MAX_KM if is_premium_active(current_user) else PLAN_GRATIS_RADIO_MAX_KM
     radius_km = min(radius_km, radio_max)
     radius_m = radius_km * 1000
@@ -118,72 +78,26 @@ def get_nearby_tasks(
     geo_task = cast(Task.ubicacion, Geography)
     geo_point = cast(point, Geography)
     now = datetime.utcnow()
-
-    publicador_premium = (
-        (User.plan == UserPlan.PREMIUM)
-        & (User.plan_expira.isnot(None))
-        & (User.plan_expira > now)
-    )
-
-    query = (
-        db.query(
-            Task,
-            ST_Distance(geo_task, geo_point).label("distance"),
-            ST_Y(Task.ubicacion).label("task_lat"),
-            ST_X(Task.ubicacion).label("task_lng"),
-            publicador_premium.label("publicador_premium"),
-        )
-        .join(User, User.id == Task.cliente_id)
-        .filter(
-            Task.estado == TaskStatus.ACTIVA,
-            Task.tipo == "necesidad",
-            ST_DWithin(geo_task, geo_point, radius_m),
-        )
-    )
+    publicador_premium = (User.plan == UserPlan.PREMIUM) & (User.plan_expira.isnot(None)) & (User.plan_expira > now)
+    query = db.query(Task, ST_Distance(geo_task, geo_point).label("distance"), ST_Y(Task.ubicacion).label("task_lat"), ST_X(Task.ubicacion).label("task_lng"), publicador_premium.label("publicador_premium")).join(User, User.id == Task.cliente_id).filter(Task.estado == TaskStatus.ACTIVA, Task.tipo == "necesidad", ST_DWithin(geo_task, geo_point, radius_m))
     if category_id:
         query = query.filter(Task.categoria_id == category_id)
     destacada_pagada = (Task.destacada == True) & (Task.destacada_hasta > now)  # noqa: E712
-    boost_activo = destacada_pagada | publicador_premium
-    results = query.order_by(boost_activo.desc(), "distance").limit(50).all()
-
-    return [
-        {
-            "id": str(task.id),
-            "titulo": task.titulo,
-            "precio": task.precio,
-            "distancia_km": round(dist / 1000, 2),
-            "categoria_id": task.categoria_id,
-            "estado": task.estado.value,
-            "destacada": bool(
-                (task.destacada and task.destacada_hasta and task.destacada_hasta > now)
-                or premium
-            ),
-            "created_at": task.created_at,
-            "lat": task_lat,
-            "lng": task_lng,
-        }
-        for task, dist, task_lat, task_lng, premium in results
-    ]
+    results = query.order_by((destacada_pagada | publicador_premium).desc(), "distance").limit(50).all()
+    return [{"id": str(task.id), "titulo": task.titulo, "precio": task.precio, "distancia_km": round(dist / 1000, 2), "categoria_id": task.categoria_id, "estado": task.estado.value, "destacada": bool((task.destacada and task.destacada_hasta and task.destacada_hasta > now) or premium), "created_at": task.created_at, "lat": task_lat, "lng": task_lng} for task, dist, task_lat, task_lng, premium in results]
 
 
 @router.get("/my")
-def get_my_tasks(
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
-):
+def get_my_tasks(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     return _get_my_publications(db, current_user, "necesidad")
 
 
 @router.get("/ofertas/mine")
-def get_my_ofertas(
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
-):
+def get_my_ofertas(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     """Servicios publicados por el trabajador autenticado.
 
-    El frontend históricamente consume /tasks/ofertas/mine. Esta ruta debe
-    existir aunque el resto de discovery use /discovery/offers; así evitamos
-    que una publicación válida termine en un 404 al abrir "Mis ofertas".
+    El contrato histórico del frontend es /tasks/ofertas/mine. En una oferta,
+    Application.worker_id representa al cliente que solicitó el servicio.
     """
     if not current_user.es_trabajador:
         raise HTTPException(status_code=403, detail="Activa tu perfil de trabajador para ver tus servicios")
@@ -195,55 +109,29 @@ def _get_my_publications(db: Session, current_user: User, tipo: str):
     from ..models.user import User as UserModel
     from ..models.review import Review
 
-    tasks = (
-        db.query(Task)
-        .filter(Task.cliente_id == current_user.id, Task.tipo == tipo)
-        .order_by(Task.created_at.desc())
-        .all()
-    )
-
+    tasks = db.query(Task).filter(Task.cliente_id == current_user.id, Task.tipo == tipo).order_by(Task.created_at.desc()).all()
     now = datetime.utcnow()
     publicador_premium = is_premium_active(current_user)
     result = []
     for task in tasks:
-        cliente_id = None
-        cliente_nombre = None
+        assigned_user_id = None
+        assigned_user_name = None
         if task.estado.value in ("asignada", "en_proceso", "completada", "confirmada"):
-            row = (
-                db.query(UserModel.id, UserModel.nombre)
-                .join(Application, Application.cliente_id == UserModel.id)
-                .filter(Application.task_id == task.id, Application.estado == AppStatus.ACEPTADA)
-                .first()
-            )
+            row = (db.query(UserModel.id, UserModel.nombre).join(Application, Application.worker_id == UserModel.id).filter(Application.task_id == task.id, Application.estado == AppStatus.ACEPTADA).first())
             if row:
-                cliente_id = str(row.id)
-                cliente_nombre = row.nombre
-
+                assigned_user_id = str(row.id)
+                assigned_user_name = row.nombre
         ya_reseniada = False
         if task.estado.value in ("completada", "confirmada"):
             ya_reseniada = db.query(Review).filter(Review.task_id == task.id).first() is not None
-
         result.append({
-            "id": str(task.id),
-            "cliente_id": str(task.cliente_id),
-            "categoria_id": task.categoria_id,
-            "titulo": task.titulo,
-            "descripcion": task.descripcion,
-            "precio": task.precio,
-            "municipio": task.municipio,
-            "zona": task.zona,
-            "referencia": task.referencia,
-            "estado": task.estado.value,
-            "destacada": bool(
-                (task.destacada and task.destacada_hasta and task.destacada_hasta > now)
-                or publicador_premium
-            ),
-            "destacada_hasta": task.destacada_hasta,
-            "created_at": task.created_at,
-            "worker_id": None,
-            "worker_nombre": None,
-            "cliente_id_asignado": cliente_id,
-            "cliente_nombre": cliente_nombre,
+            "id": str(task.id), "cliente_id": str(task.cliente_id), "categoria_id": task.categoria_id,
+            "titulo": task.titulo, "descripcion": task.descripcion, "precio": task.precio,
+            "municipio": task.municipio, "zona": task.zona, "referencia": task.referencia,
+            "estado": task.estado.value, "destacada": bool((task.destacada and task.destacada_hasta and task.destacada_hasta > now) or publicador_premium),
+            "destacada_hasta": task.destacada_hasta, "created_at": task.created_at,
+            "worker_id": None, "worker_nombre": None,
+            "cliente_id_asignado": assigned_user_id, "cliente_nombre": assigned_user_name,
             "ya_reseniada": ya_reseniada,
         })
     return result
@@ -258,12 +146,7 @@ def get_task(task_id: UUID, db: Session = Depends(get_db)):
 
 
 @router.put("/{task_id}", response_model=TaskResponse)
-def update_task(
-    task_id: UUID,
-    payload: TaskUpdate,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
-):
+def update_task(task_id: UUID, payload: TaskUpdate, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     task = db.query(Task).filter(Task.id == task_id).first()
     if not task:
         raise HTTPException(status_code=404, detail="Tarea no encontrada")
@@ -271,9 +154,7 @@ def update_task(
         raise HTTPException(status_code=403, detail="No eres el publicador de esta publicación")
     if task.estado != TaskStatus.ACTIVA:
         raise HTTPException(status_code=400, detail="Sólo se puede editar una publicación mientras está activa")
-
-    data = payload.model_dump(exclude_unset=True)
-    for field, value in data.items():
+    for field, value in payload.model_dump(exclude_unset=True).items():
         setattr(task, field, value)
     db.commit()
     db.refresh(task)
@@ -281,11 +162,7 @@ def update_task(
 
 
 @router.delete("/{task_id}")
-def delete_task(
-    task_id: UUID,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
-):
+def delete_task(task_id: UUID, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     task = db.query(Task).filter(Task.id == task_id).first()
     if not task:
         raise HTTPException(status_code=404, detail="Tarea no encontrada")
@@ -295,18 +172,13 @@ def delete_task(
         raise HTTPException(status_code=400, detail="No se puede cancelar una publicación ya completada")
     if task.estado == TaskStatus.CANCELADA:
         raise HTTPException(status_code=400, detail="Esta publicación ya está cancelada")
-
     task.estado = TaskStatus.CANCELADA
     db.commit()
     return {"message": "Publicación cancelada correctamente"}
 
 
 @router.post("/{task_id}/complete", response_model=TaskResponse)
-def complete_task(
-    task_id: UUID,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
-):
+def complete_task(task_id: UUID, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     task = db.query(Task).filter(Task.id == task_id).first()
     if not task:
         raise HTTPException(status_code=404, detail="Tarea no encontrada")
