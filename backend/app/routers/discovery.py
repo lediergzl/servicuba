@@ -80,7 +80,7 @@ def directory_municipios(db: Session = Depends(get_db)):
             func.length(func.trim(Task.municipio)) >= 2,
         )
         .distinct()
-        .order_by(func.lower(Task.municipio))
+        .order_by(Task.municipio)
         .all()
     )
     return sorted({row[0].strip() for row in rows if row[0] and row[0].strip()}, key=str.casefold)
