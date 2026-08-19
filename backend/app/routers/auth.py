@@ -5,6 +5,7 @@ from ..database import get_db
 from ..models.user import User
 from ..schemas.user import UserCreate, UserLogin, Token, UserResponse
 from ..utils.security import verify_password, get_password_hash, create_access_token
+from ..services.auth import get_current_user
 from ..services.user_profile import build_user_response
 from datetime import timedelta
 from ..config import get_settings
@@ -59,9 +60,6 @@ def register(user: UserCreate, db: Session = Depends(get_db)):
 def login(user: UserLogin, db: Session = Depends(get_db)):
     telefono = normalize_phone(user.telefono)
 
-    # Primero intentamos el formato canónico. Si la cuenta fue creada antes
-    # de centralizar la normalización, buscamos también la versión limpia de
-    # la columna para evitar un 401 falso por espacios/guiones/paréntesis.
     db_user = db.query(User).filter(User.telefono == telefono).first()
     if not db_user:
         db_user = db.query(User).filter(normalized_phone_column() == telefono).first()
@@ -74,3 +72,9 @@ def login(user: UserLogin, db: Session = Depends(get_db)):
         expires_delta=timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
     )
     return {"access_token": access_token, "token_type": "bearer"}
+
+
+@router.get("/me", response_model=UserResponse)
+def me(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    """Devuelve el usuario autenticado para restaurar la sesión del frontend."""
+    return build_user_response(db, current_user)
