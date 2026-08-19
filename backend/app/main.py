@@ -8,7 +8,7 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, FileResponse
 from .routers import auth, users, categories, tasks, applications, reviews, chat, push, native_push, verification, payments, ads, password_reset, task_lifecycle, admin, discovery, dashboard, reports
 from .database import engine, Base, SessionLocal
 from .models.category import Category
@@ -83,4 +83,9 @@ FRONTEND_DIR = Path(__file__).resolve().parent.parent.parent / "frontend"
 PUBLIC_SEO_DIR = Path(__file__).resolve().parent.parent.parent / "public-seo"
 if PUBLIC_SEO_DIR.joinpath("servicios").is_dir():
     app.mount("/servicios", StaticFiles(directory=PUBLIC_SEO_DIR / "servicios", html=True), name="public-seo-servicios")
+@app.get("/sitemap.xml", include_in_schema=False)
+def public_sitemap():
+    sitemap = PUBLIC_SEO_DIR / "sitemap.xml"
+    if sitemap.is_file(): return FileResponse(sitemap, media_type="application/xml")
+    return JSONResponse(status_code=404, content={"detail": "Sitemap no disponible"})
 if FRONTEND_DIR.is_dir(): app.mount("/", StaticFiles(directory=FRONTEND_DIR, html=True), name="frontend")
