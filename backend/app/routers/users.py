@@ -63,10 +63,8 @@ def activar_trabajador(body: ActivarTrabajadorRequest, db: Session = Depends(get
     if body.lng is not None:
         current_user.lng = body.lng
 
-    # BASE es un estado comercial derivado de es_trabajador, no se debe
-    # persistir aquí: la base de datos existente puede no tener todavía el
-    # valor BASE en su enum PostgreSQL userplan. effective_plan() ya devuelve
-    # BASE automáticamente para cualquier trabajador no-PREMIUM.
+    # BASE es un estado comercial derivado de es_trabajador, no se persiste aquí.
+    # Esto evita depender de que el enum PostgreSQL ya tenga BASE.
     current_user.modo_activo = "trabajador"
 
     try:
@@ -97,8 +95,19 @@ def cambiar_modo_activo(body: ModoActivoRequest, db: Session = Depends(get_db), 
 
 @router.get("/stats/workers-count")
 def workers_count(db: Session = Depends(get_db)):
-    total = db.query(User).filter(User.es_trabajador == True).count()  # noqa: E712
-    rows = db.query(User.categoria_id, func.count(User.id)).filter(User.es_trabajador == True, User.categoria_id.isnot(None)).group_by(User.categoria_id).all()
+    """Cuenta únicamente trabajadores realmente disponibles para el marketplace."""
+    base_filter = (
+        User.es_trabajador.is_(True),
+        User.suspendido.is_(False),
+        User.categoria_id.isnot(None),
+    )
+    total = db.query(User.id).filter(*base_filter).count()
+    rows = (
+        db.query(User.categoria_id, func.count(User.id))
+        .filter(*base_filter)
+        .group_by(User.categoria_id)
+        .all()
+    )
     return {"total": total, "por_categoria": {str(cat_id): count for cat_id, count in rows}}
 
 @router.get("/admin/list")
