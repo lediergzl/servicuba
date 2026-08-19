@@ -1,8 +1,8 @@
-import { apiFetch, notify } from './core.js';
+import { apiFetch, notify, escapeHtml } from './core.js';
 import { initAuth, showLanding, showRegister, showLogin, logout } from './auth.js';
 import { initTasks, loadCategories, showDashboardCliente, showDashboardTrabajador, switchView } from './tasks.js';
 import { initMap } from './map.js';
-import { initChat, setCurrentUserId } from './chat.js';
+import { initChat, setCurrentUserId, openChatForTask } from './chat.js';
 import { initPush, enablePushNotifications } from './push-native.js';
 import { initVerification, refreshVerificationBanner } from './verification.js';
 import { initSponsorAdEntry } from './monetization.js';
@@ -27,9 +27,11 @@ function installHeaderResponsiveNav() {
         btn.dataset.headerView = view;
         btn.textContent = label;
         btn.setAttribute('aria-label', label);
-        btn.addEventListener('click', () => {
-            if (view === 'municipioDirectory') openMunicipioDirectory();
+        btn.addEventListener('click', async () => {
+            if (view === 'municipioDirectory') await openMunicipioDirectory();
             else if (view === 'landing') showLanding();
+            else if (view === 'dashboardTrabajador') await openWorkerView();
+            else if (view === 'mensajesView') await openMessagesView();
             else switchView(view);
             mobileMenu?.classList.remove('is-open');
             menuBtn?.setAttribute('aria-expanded', 'false');
@@ -70,14 +72,103 @@ function setAuthUi() {
     document.getElementById('bottomNav')?.classList.remove('hidden');
     document.getElementById('modoSwitch')?.classList.remove('hidden');
 }
+
+async function openWorkerView() {
+    if (!localStorage.getItem('token')) {
+        sessionStorage.setItem('servicuba_intent', 'trabajador');
+        showLogin();
+        return;
+    }
+    try {
+        const me = await apiFetch('/auth/me');
+        if (!me.es_trabajador) {
+            notify('Completa tu perfil de trabajador para acceder a esta sección.', 'info');
+            switchView('perfilView');
+            return;
+        }
+        setCurrentUserId(me.id || me.user_id);
+        setAuthUi();
+        showDashboardTrabajador();
+    } catch (err) {
+        notify('No pudimos abrir la sección de trabajador. Inicia sesión nuevamente.', 'error');
+    }
+}
+
+async function loadProfileView() {
+    const container = document.getElementById('perfilContenido');
+    if (!container) return;
+    container.innerHTML = '<p class="view-subtitle">Cargando perfil…</p>';
+    try {
+        const profile = await apiFetch('/users/profile');
+        const role = profile.es_trabajador ? 'Trabajador' : 'Cliente';
+        const category = profile.categoria_nombre || profile.categoria || 'Sin oficio configurado';
+        const rating = profile.rating != null ? Number(profile.rating).toFixed(1) : '0.0';
+        container.innerHTML = `
+            <div class="task-card">
+                <div class="task-card__row"><h3 class="task-card__title">${escapeHtml(profile.nombre || 'Usuario')}</h3><span class="chip">${escapeHtml(role)}</span></div>
+                <p class="task-card__meta">${escapeHtml(profile.telefono || '')}</p>
+                <p class="task-card__meta">${escapeHtml(category)} · ⭐ ${escapeHtml(rating)}</p>
+                ${profile.municipio ? `<p class="task-card__meta">${escapeHtml(profile.municipio)}${profile.zona ? ` · ${escapeHtml(profile.zona)}` : ''}</p>` : ''}
+                ${profile.descripcion_trabajador ? `<p>${escapeHtml(profile.descripcion_trabajador)}</p>` : ''}
+            </div>`;
+    } catch (err) {
+        container.innerHTML = '<p class="empty-state">No pudimos cargar tu perfil. Inténtalo nuevamente.</p>';
+        notify(`No se pudo cargar el perfil: ${err.message}`, 'error');
+    }
+}
+
+async function openProfileView() {
+    if (!localStorage.getItem('token')) {
+        showLogin();
+        return;
+    }
+    switchView('perfilView');
+    await loadProfileView();
+}
+
+async function openMessagesView() {
+    if (!localStorage.getItem('token')) {
+        showLogin();
+        return;
+    }
+    switchView('mensajesView');
+    const list = document.getElementById('listaConversaciones');
+    if (!list) return;
+    list.innerHTML = '<p class="view-subtitle">Cargando conversaciones…</p>';
+    try {
+        const conversations = await apiFetch('/chat/conversations');
+        if (!conversations.length) {
+            list.innerHTML = '<p class="empty-state">Todavía no tienes conversaciones.</p>';
+            return;
+        }
+        list.innerHTML = conversations.map(c => `
+            <button type="button" class="task-card conversation-card" data-chat-task="${escapeHtml(c.task_id)}" style="text-align:left;width:100%;border:0;cursor:pointer">
+                <div class="task-card__row"><strong>${escapeHtml(c.otro_participante || 'Contacto')}</strong>${c.no_leidos ? `<span class="chip">${escapeHtml(String(c.no_leidos))} sin leer</span>` : ''}</div>
+                <p class="task-card__meta">${escapeHtml(c.titulo || 'Servicio')} · ${escapeHtml(c.estado || '')}</p>
+                <p class="task-card__meta">${escapeHtml(c.ultimo_mensaje || 'Sin mensajes todavía')}</p>
+            </button>`).join('');
+        list.querySelectorAll('[data-chat-task]').forEach(btn => btn.addEventListener('click', () => openChatForTask(btn.dataset.chatTask)));
+    } catch (err) {
+        list.innerHTML = '<p class="empty-state">No pudimos cargar tus mensajes.</p>';
+        notify(`No se pudieron cargar los mensajes: ${err.message}`, 'error');
+    }
+}
+
 function wireGlobalButtons() {
     document.getElementById('loginBtn')?.addEventListener('click', showLogin);
     document.getElementById('loginBtn2')?.addEventListener('click', showLogin);
     document.getElementById('registerBtn')?.addEventListener('click', showRegister);
     document.getElementById('logoutBtn')?.addEventListener('click', logout);
     document.getElementById('enablePushBtn')?.addEventListener('click', () => enablePushNotifications().catch(err => notify(err.message || 'No se pudieron activar las notificaciones.', 'error')));
-    document.querySelectorAll('[data-view]').forEach(btn => btn.addEventListener('click', () => switchView(btn.dataset.view)));
+    document.querySelectorAll('[data-view]').forEach(btn => btn.addEventListener('click', async () => {
+        const view = btn.dataset.view;
+        if (view === 'mensajes') return openMessagesView();
+        if (view === 'perfil') return openProfileView();
+        if (view === 'dashboardTrabajador') return openWorkerView();
+        return switchView(view);
+    }));
 }
+
 async function restoreSession() {
     if (!localStorage.getItem('token')) return false;
     try {
@@ -88,6 +179,7 @@ async function restoreSession() {
         return true;
     } catch (err) { localStorage.removeItem('token'); setGuestUi(); return false; }
 }
+
 async function boot() {
     setGuestUi(); showLanding();
     const headerCss = document.createElement('link'); headerCss.rel = 'stylesheet'; headerCss.href = '/css/header-responsive-fix.css?v=2'; document.head.appendChild(headerCss);
