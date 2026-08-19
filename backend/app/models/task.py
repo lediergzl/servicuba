@@ -33,4 +33,5 @@ class Task(Base):
     tipo = Column(String(20), default="necesidad", nullable=False)
     destacada = Column(Boolean, default=False, nullable=False)
     destacada_hasta = Column(DateTime, nullable=True)
+    fotos = Column(Text, nullable=True)
     created_at = Column(DateTime, server_default=func.now())
