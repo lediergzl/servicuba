@@ -13,6 +13,11 @@
 .app-header__mobile-link { appearance: none; -webkit-appearance: none; user-select: none; -webkit-user-select: none; width: 100%; text-align: left; border: 0; background: transparent; color: white; font: 600 14px/1.2 var(--font-body); padding: 11px 12px; border-radius: var(--radius-sm); cursor: pointer; }
 .app-header__mobile-link:hover, .app-header__mobile-link:focus-visible { background: rgba(255,255,255,.08); outline: none; }
 .app-header__mobile-link.is-active { color: var(--accent); }
+@media (min-width: 761px) {
+  .app-shell { max-width: 1100px; }
+  .app-main { width: 100%; max-width: 520px; margin-inline: auto; }
+  .bottom-nav { max-width: 520px; left: 50%; transform: translateX(-50%); right: auto; width: 100%; }
+}
 @media (max-width: 760px) {
   .app-header { position: sticky; }
   .app-header__nav { display: none; }
