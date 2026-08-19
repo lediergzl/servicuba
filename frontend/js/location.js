@@ -3,20 +3,47 @@ import { nativeGetCurrentPosition, isNativeApp } from './native.js';
 
 const STORAGE_KEY = 'servicuba:lastLocation';
 
+function normalizePosition(pos, source) {
+    if (!pos?.coords) return null;
+    const lat = Number(pos.coords.latitude);
+    const lng = Number(pos.coords.longitude);
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+    return {
+        lat,
+        lng,
+        accuracy: pos.coords.accuracy || null,
+        source
+    };
+}
+
+function saveLocation(location) {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(location));
+    return location;
+}
+
+// Punto único para GPS web.
 export async function getLocationWithFallback() {
     try {
         const pos = await getGeolocation();
-        const location = {
-            lat: Number(pos.coords.latitude),
-            lng: Number(pos.coords.longitude),
-            accuracy: pos.coords.accuracy || null,
-            source: pos._servicubaSource || 'gps'
-        };
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(location));
-        return location;
+        const location = normalizePosition(pos, pos._servicubaSource || 'gps');
+        return location ? saveLocation(location) : null;
     } catch {
         return null;
     }
+}
+
+// Punto único recomendado para TODA la aplicación: APK primero, web después.
+export async function getBestLocation() {
+    if (isNativeApp()) {
+        try {
+            const pos = await nativeGetCurrentPosition();
+            const location = normalizePosition(pos, 'native-gps');
+            if (location) return saveLocation(location);
+        } catch (err) {
+            console.warn('[ServiCuba] GPS nativo no disponible, usando GPS web:', err);
+        }
+    }
+    return getLocationWithFallback();
 }
 
 export function getSavedLocation() {
@@ -36,27 +63,4 @@ export function getSavedLocation() {
 
 export function clearSavedLocation() {
     localStorage.removeItem(STORAGE_KEY);
-}
-
-// Punto único de entrada para ubicación. Si la APK expone el puente nativo,
-// usamos GPS nativo; la web normal sigue usando core.js/navigator.geolocation.
-export async function getBestLocation() {
-    if (isNativeApp()) {
-        try {
-            const pos = await nativeGetCurrentPosition();
-            if (pos?.coords) {
-                const location = {
-                    lat: Number(pos.coords.latitude),
-                    lng: Number(pos.coords.longitude),
-                    accuracy: pos.coords.accuracy || null,
-                    source: 'native-gps'
-                };
-                localStorage.setItem(STORAGE_KEY, JSON.stringify(location));
-                return location;
-            }
-        } catch (err) {
-            console.warn('[ServiCuba] GPS nativo no disponible, usando fallback web:', err);
-        }
-    }
-    return getLocationWithFallback();
 }
