@@ -54,15 +54,27 @@ def activar_trabajador(body: ActivarTrabajadorRequest, db: Session = Depends(get
     current_user.categoria_id = body.categoria_id
     current_user.descripcion_trabajador = body.descripcion_trabajador.strip() if body.descripcion_trabajador else None
     current_user.precio_hora = body.precio_hora
-    if body.municipio is not None: current_user.municipio = body.municipio.strip() or None
-    if body.zona is not None: current_user.zona = body.zona.strip() or None
-    if body.lat is not None: current_user.lat = body.lat
-    if body.lng is not None: current_user.lng = body.lng
-    if current_user.plan == UserPlan.GRATIS:
-        current_user.plan = UserPlan.BASE
+    if body.municipio is not None:
+        current_user.municipio = body.municipio.strip() or None
+    if body.zona is not None:
+        current_user.zona = body.zona.strip() or None
+    if body.lat is not None:
+        current_user.lat = body.lat
+    if body.lng is not None:
+        current_user.lng = body.lng
+
+    # BASE es un estado comercial derivado de es_trabajador, no se debe
+    # persistir aquí: la base de datos existente puede no tener todavía el
+    # valor BASE en su enum PostgreSQL userplan. effective_plan() ya devuelve
+    # BASE automáticamente para cualquier trabajador no-PREMIUM.
     current_user.modo_activo = "trabajador"
 
-    db.commit()
+    try:
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+
     db.refresh(current_user)
     return build_user_response(db, current_user)
 
@@ -75,7 +87,11 @@ def cambiar_modo_activo(body: ModoActivoRequest, db: Session = Depends(get_db), 
     if body.modo == "trabajador" and not current_user.es_trabajador:
         raise HTTPException(status_code=403, detail="Completa tu perfil de trabajador antes de activar este modo")
     current_user.modo_activo = body.modo
-    db.commit()
+    try:
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
     db.refresh(current_user)
     return build_user_response(db, current_user)
 
