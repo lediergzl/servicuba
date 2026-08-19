@@ -6,6 +6,7 @@ import { initChat, setCurrentUserId } from './chat.js';
 import { initPush, enablePushNotifications } from './push-native.js';
 import { initVerification, refreshVerificationBanner } from './verification.js';
 import { initSponsorAdEntry } from './monetization.js';
+import { initLandingSearch } from './landing.js';
 
 function setGuestUi() {
     document.getElementById('user-menu-guest')?.classList.remove('hidden');
@@ -52,6 +53,11 @@ async function boot() {
     // Así un fallo auxiliar nunca deja la app bloqueada en el header.
     setGuestUi();
     showLanding();
+
+    // Construye inmediatamente la portada de producto. La carga de datos
+    // internos tiene su propio fallback para que un fallo de API nunca deje
+    // visible la landing HTML mínima.
+    try { await initLandingSearch(); } catch (err) { console.error('initLandingSearch', err); }
 
     try { initAuth(); } catch (err) { console.error('initAuth', err); }
     try { initTasks(); } catch (err) { console.error('initTasks', err); }
