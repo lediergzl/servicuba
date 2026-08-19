@@ -1,0 +1,29 @@
+/* ServiCuba header: navegación real sin compresión ni selección accidental */
+.app-header { gap: 16px; padding: 10px 16px; }
+.app-header__brand { flex: 0 0 auto; min-width: max-content; }
+.app-header__nav { display: flex; align-items: center; gap: 6px; flex: 1 1 auto; min-width: 0; justify-content: center; }
+.app-header__nav-link { appearance: none; -webkit-appearance: none; user-select: none; -webkit-user-select: none; touch-action: manipulation; white-space: nowrap; border: 0; background: transparent; color: rgba(255,255,255,.82); font: 600 12px/1.1 var(--font-body); padding: 8px 7px; border-radius: var(--radius-sm); cursor: pointer; }
+.app-header__nav-link:hover, .app-header__nav-link:focus-visible { color: white; background: rgba(255,255,255,.08); outline: none; }
+.app-header__nav-link.is-active { color: var(--accent); }
+.app-header__account { flex: 0 0 auto; min-width: max-content; }
+.app-header__menu-btn { display: none; flex: 0 0 auto; width: 38px; height: 38px; padding: 0; border: 1px solid rgba(255,255,255,.18); border-radius: var(--radius-sm); background: transparent; color: white; align-items: center; justify-content: center; cursor: pointer; user-select: none; -webkit-user-select: none; }
+.app-header__menu-btn .icon { width: 19px; height: 19px; }
+.app-header__mobile-menu { display: none; position: absolute; top: 100%; left: 0; right: 0; background: var(--ink); border-top: 1px solid rgba(255,255,255,.1); padding: 8px; box-shadow: var(--shadow-raised); }
+.app-header__mobile-menu.is-open { display: grid; gap: 3px; }
+.app-header__mobile-link { appearance: none; -webkit-appearance: none; user-select: none; -webkit-user-select: none; width: 100%; text-align: left; border: 0; background: transparent; color: white; font: 600 14px/1.2 var(--font-body); padding: 11px 12px; border-radius: var(--radius-sm); cursor: pointer; }
+.app-header__mobile-link:hover, .app-header__mobile-link:focus-visible { background: rgba(255,255,255,.08); outline: none; }
+.app-header__mobile-link.is-active { color: var(--accent); }
+@media (max-width: 760px) {
+  .app-header { position: sticky; }
+  .app-header__nav { display: none; }
+  .app-header__menu-btn { display: inline-flex; }
+  .app-header__account { margin-left: auto; }
+}
+@media (min-width: 761px) and (max-width: 980px) {
+  .app-header { gap: 10px; padding-inline: 12px; }
+  .app-header__nav { gap: 2px; }
+  .app-header__nav-link { font-size: 11px; padding-inline: 5px; }
+  .app-header__brand { gap: 6px; }
+  .logo-mark { width: 30px; height: 30px; }
+  .app-header__wordmark { font-size: 17px; }
+}
