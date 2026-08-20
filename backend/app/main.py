@@ -86,36 +86,40 @@ for router, prefix, tags in [
     app.include_router(router, prefix=prefix, tags=tags)
 
 
-def _health_response():
+def _database_health():
     try:
         with engine.connect() as conn:
             conn.execute(text("SELECT 1"))
-        return {"status": "ok", "database": "ok"}
+        return True
     except Exception:
         logger.exception("Health check: database unavailable")
-        raise HTTPException(status_code=503, detail="Servicio temporalmente no disponible")
+        return False
 
 
 @app.get("/health", tags=["Health"])
 def health():
-    """Health check para Render y monitorización externa."""
-    return _health_response()
+    """Liveness check para Render: confirma que el proceso FastAPI está vivo.
+
+    Este endpoint NO depende de PostgreSQL. Render debe usarlo para determinar
+    si el contenedor está vivo; una caída temporal/despertar lento de Neon no
+    debe provocar que Render marque el servicio como unhealthy y lo reinicie.
+    """
+    return {"status": "ok"}
 
 
-# Mantener compatibilidad con el endpoint existente de la API.
 @app.get("/api/health", tags=["Health"])
 def api_health():
-    """Health check de compatibilidad bajo /api."""
-    return _health_response()
+    """Health check de compatibilidad bajo /api, también sin dependencia de DB."""
+    return {"status": "ok"}
 
-SEO_CITIES = {"la-habana": "La Habana", "santiago-de-cuba": "Santiago de Cuba", "holguin": "Holguín", "camaguey": "Camagüey", "santa-clara": "Santa Clara"}
-SEO_SERVICES = {"electricistas": "Electricistas", "plomeros": "Plomeros", "reparadores": "Reparadores", "albaniles": "Albañiles", "pintores": "Pintores"}
-SEO_BASE = "https://servicuba.onrender.com"
 
-def _seo_document(title: str, description: str, canonical: str, body: str) -> HTMLResponse:
-    schema = json.dumps({"@context": "https://schema.org", "@type": "WebPage", "name": title, "description": description, "url": canonical, "isPartOf": {"@type": "WebSite", "name": "ServiCuba", "url": SEO_BASE}}, ensure_ascii=False)
-    html = f'''<!doctype html><html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>{escape(title)}</title><meta name="description" content="{escape(description)}"><link rel="canonical" href="{escape(canonical)}"><meta property="og:title" content="{escape(title)}"><meta property="og:description" content="{escape(description)}"><meta property="og:type" content="website"><meta property="og:url" content="{escape(canonical)}"><script type="application/ld+json">{schema}</script></head><body><main>{body}</main></body></html>'''
-    return HTMLResponse(html)
+@app.get("/health/db", tags=["Health"])
+def health_db():
+    """Readiness check opcional que valida conectividad real con PostgreSQL."""
+    if not _database_health():
+        raise HTTPException(status_code=503, detail="Base de datos temporalmente no disponible")
+    return {"status": "ok", "database": "ok"}
+
 
 SEO_CITIES = {"la-habana": "La Habana", "santiago-de-cuba": "Santiago de Cuba", "holguin": "Holguín", "camaguey": "Camagüey", "santa-clara": "Santa Clara"}
 SEO_SERVICES = {"electricistas": "Electricistas", "plomeros": "Plomeros", "reparadores": "Reparadores", "albaniles": "Albañiles", "pintores": "Pintores"}
