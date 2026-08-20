@@ -11,6 +11,22 @@ function normalizePhone(value) { return String(value || '').replace(/[\s().-]/g,
 function normalizeEmail(value) { return String(value || '').trim().toLowerCase(); }
 function validEmail(value) { return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizeEmail(value)); }
 
+function ensureRegistrationEmailField() {
+    const form = document.getElementById('registerForm');
+    if (!form || document.getElementById('regEmail')) return;
+    const phone = document.getElementById('regTelefono');
+    const input = document.createElement('input');
+    input.type = 'email';
+    input.id = 'regEmail';
+    input.name = 'email';
+    input.className = 'field-input';
+    input.placeholder = 'Correo electrónico';
+    input.autocomplete = 'email';
+    input.required = true;
+    if (phone?.parentNode === form) phone.insertAdjacentElement('afterend', input);
+    else form.insertBefore(input, form.firstChild);
+}
+
 function validateRegistration(data, esTrabajador) {
     if (!data.nombre || data.nombre.trim().length < 2) return 'Escribe tu nombre completo.';
     if (!/^\+?[0-9]{7,20}$/.test(normalizePhone(data.telefono))) return 'Escribe un teléfono válido.';
@@ -26,18 +42,15 @@ function ensureAuthNavigation() {
         const view = document.getElementById(viewId);
         if (!view || view.querySelector('[data-action="back-home"]')) return;
         const link = document.createElement('button');
-        link.type = 'button';
-        link.className = 'btn btn-ghost btn-sm auth-back-home';
+        link.type = 'button'; link.className = 'btn btn-ghost btn-sm auth-back-home';
         link.dataset.action = 'back-home';
         link.innerHTML = '<svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M19 12H6M11 6l-6 6 6 6"/></svg>' + text;
         view.insertBefore(link, view.firstChild);
     };
-    addBackLink('login', 'Volver al inicio');
-    addBackLink('register', 'Volver al inicio');
+    addBackLink('login', 'Volver al inicio'); addBackLink('register', 'Volver al inicio');
     document.querySelectorAll('[data-action="back-home"]').forEach(btn => {
         if (btn.dataset.wired === '1') return;
-        btn.dataset.wired = '1';
-        btn.addEventListener('click', () => showLanding());
+        btn.dataset.wired = '1'; btn.addEventListener('click', () => showLanding());
     });
 }
 
@@ -47,6 +60,7 @@ export function initAuth() {
     const regEsTrabajador = document.getElementById('regEsTrabajador');
     let regLastLat = null, regLastLng = null;
     ensureAuthNavigation();
+    ensureRegistrationEmailField();
 
     regEsTrabajador?.addEventListener('change', (e) => {
         const show = e.target.checked;
@@ -77,11 +91,8 @@ export function initAuth() {
             await apiFetch('/auth/register', { method: 'POST', body: JSON.stringify(data) });
             notify('Cuenta creada. Revisa tu correo: te enviamos un código de verificación.', 'success');
             showLogin();
-        } catch (err) {
-            notify(err.message || 'No se pudo crear la cuenta.', 'error');
-        } finally {
-            if (submitBtn) { submitBtn.disabled = false; submitBtn.textContent = 'Registrarse'; }
-        }
+        } catch (err) { notify(err.message || 'No se pudo crear la cuenta.', 'error'); }
+        finally { if (submitBtn) { submitBtn.disabled = false; submitBtn.textContent = 'Registrarse'; } }
     });
 
     loginForm?.addEventListener('submit', async (e) => {
@@ -101,8 +112,7 @@ export function initAuth() {
                 throw new Error(body?.detail || `Error ${res.status}`);
             }
             if (!body?.access_token) throw new Error('El servidor no devolvió un token de acceso.');
-            localStorage.setItem('token', body.access_token);
-            window.location.reload();
+            localStorage.setItem('token', body.access_token); window.location.reload();
         } catch (err) { notify(`Error: ${err.message}`, 'error'); }
         finally { if (submitBtn) { submitBtn.disabled = false; submitBtn.textContent = 'Ingresar'; } }
     });
