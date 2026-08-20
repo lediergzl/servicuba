@@ -2,6 +2,9 @@ import { apiFetch, notify, showFormModal, showConfirm, escapeHtml } from './core
 
 let pricingCache = null;
 let observerInstalled = false;
+let premiumOpportunityObserverInstalled = false;
+let premiumOpportunityUserCache = null;
+let premiumOpportunityUserCacheAt = 0;
 
 function formatDate(iso) {
     return iso ? new Date(iso).toLocaleDateString('es-CU', { day: 'numeric', month: 'short', year: 'numeric' }) : '';
@@ -127,6 +130,54 @@ function installProfileObserver() {
     }).observe(target, { attributes: true, attributeFilter: ['class'] });
 }
 
+async function getCachedPremiumWorker() {
+    if (!localStorage.getItem('token')) return null;
+    const now = Date.now();
+    if (premiumOpportunityUserCache && now - premiumOpportunityUserCacheAt < 30000) return premiumOpportunityUserCache;
+    try {
+        const user = await apiFetch('/users/profile');
+        premiumOpportunityUserCache = effectivePlan(user) === 'premium' && Boolean(user.es_trabajador) ? user : null;
+        premiumOpportunityUserCacheAt = now;
+        return premiumOpportunityUserCache;
+    } catch {
+        return null;
+    }
+}
+
+async function renderPremiumOpportunityPanel() {
+    const panel = document.getElementById('tareasCercanasPanel');
+    if (!panel) return;
+    const user = await getCachedPremiumWorker();
+    const existing = document.getElementById('premiumOpportunityBanner');
+    if (!user) {
+        existing?.remove();
+        return;
+    }
+    const list = document.getElementById('listaTareas');
+    if (!list) return;
+    let banner = existing;
+    if (!banner) {
+        banner = document.createElement('div');
+        banner.id = 'premiumOpportunityBanner';
+        banner.className = 'premium-opportunities-banner';
+        list.before(banner);
+    }
+    const radius = Number(user.coverage_radius_km || user.radio_cobertura_km || 20);
+    banner.innerHTML = `<div class="premium-opportunities-banner__title">⚡ Oportunidades Premium</div><div class="premium-opportunities-banner__text">Ves los mejores trabajos antes que los demás trabajadores durante la ventana prioritaria.</div><div class="premium-opportunities-banner__meta"><span>⭐ Prioridad de acceso</span><span>📍 Alcance ${radius} km</span></div>`;
+    banner.classList.remove('hidden');
+}
+
+function installPremiumOpportunityPanel() {
+    if (premiumOpportunityObserverInstalled) return;
+    premiumOpportunityObserverInstalled = true;
+    const check = () => { if (document.getElementById('tareasCercanasPanel')) renderPremiumOpportunityPanel(); };
+    const observer = new MutationObserver(check);
+    observer.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ['class'] });
+    document.addEventListener('servicuba:premium-opportunities-refresh', check);
+    check();
+    window.setInterval(check, 5000);
+}
+
 export function initSponsorAdEntry() {
     document.getElementById('sponsorAdBtn')?.addEventListener('click', async () => {
         const pricing = await getPricing();
@@ -143,6 +194,7 @@ export function initSponsorAdEntry() {
         catch (err) { notify(err.message || 'No se pudo solicitar el anuncio.', 'error'); }
     });
     installProfileObserver();
+    installPremiumOpportunityPanel();
     document.addEventListener('servicuba:premium-upsell', showPremiumUpsell);
 }
 
