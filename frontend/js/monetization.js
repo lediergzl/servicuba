@@ -1,307 +1,158 @@
-// ============================================================
-// Monetización: plan premium, tareas destacadas, anuncios de marca
-// ============================================================
 import { apiFetch, notify, showFormModal, showConfirm, escapeHtml } from './core.js';
 
-// Todo esto usa pagos "pendientes de confirmación manual" (ver
-// backend/app/routers/payments.py) porque todavía no hay una pasarela de
-// pago digital conectada — es intencional, no un bug.
+let pricingCache = null;
+let observerInstalled = false;
 
 function formatDate(iso) {
-    if (!iso) return '';
-    return new Date(iso).toLocaleDateString('es-CU', { day: 'numeric', month: 'short', year: 'numeric' });
+    return iso ? new Date(iso).toLocaleDateString('es-CU', { day: 'numeric', month: 'short', year: 'numeric' }) : '';
 }
 
-// Cache simple en memoria — los precios no cambian durante la sesión y
-// esto evita pedirlos de nuevo cada vez que se abre un modal.
-let pricingCache = null;
 async function getPricing() {
     if (pricingCache) return pricingCache;
-    try {
-        pricingCache = await apiFetch('/payments/pricing');
-    } catch {
-        pricingCache = null;
-    }
+    try { pricingCache = await apiFetch('/payments/pricing'); } catch { pricingCache = null; }
     return pricingCache;
 }
 
-// ---------- Sección premium en el perfil ----------
+function effectivePlan(user) {
+    const p = String(user?.plan || 'BASE').toLowerCase();
+    if (p === 'premium' && user?.plan_expira && new Date(user.plan_expira) <= new Date()) return 'base';
+    return p;
+}
+
+function premiumCard(user, state) {
+    const plan = effectivePlan(user);
+    const info = state?.plan || state || {};
+    const limit = Number(info.limite_diario ?? (plan === 'premium' ? 10 : plan === 'free' ? 0 : 1));
+    const used = Number(info.publicaciones_hoy ?? 0);
+    const remaining = Number(info.restantes_hoy ?? Math.max(0, limit - used));
+    const radius = Number(info.coverage_radius_km ?? (plan === 'premium' ? 20 : 5));
+    if (plan === 'premium') {
+        return `<div class="task-card premium-benefits-card"><div class="task-card__row"><h3 class="task-card__title">⭐ PREMIUM</h3><span class="chip">Activo</span></div><p class="task-card__meta">Cobertura Premium: <strong>${radius} km</strong></p><p class="task-card__meta">Te quedan <strong>${remaining} de ${limit}</strong> publicaciones hoy</p>${user.plan_expira ? `<p class="task-card__meta">Vence el ${escapeHtml(formatDate(user.plan_expira))}</p>` : ''}<button id="premiumPromoteBtn" class="btn btn-accent btn-block btn-sm">📣 Promocionar mi servicio</button><button id="myPromotionalAdsBtn" class="btn btn-secondary btn-block btn-sm">Mis anuncios</button></div>`;
+    }
+    const title = plan === 'free' ? 'Plan FREE' : 'Plan BASE';
+    return `<div class="task-card"><div class="task-card__row"><h3 class="task-card__title">${title}</h3><span class="chip">${remaining} de ${limit}</span></div><p class="task-card__meta">Cobertura actual: ${radius} km · ${remaining} publicación${remaining === 1 ? '' : 'es'} disponible${remaining === 1 ? '' : 's'} hoy.</p><button id="upgradePremiumBtn" class="btn btn-accent btn-block btn-sm">⭐ Ver ventajas PREMIUM</button></div>`;
+}
+
+async function fetchPlanState() {
+    try { return await apiFetch('/dashboard/state'); } catch { return null; }
+}
 
 export async function renderPremiumSection() {
     const el = document.getElementById('premiumSection');
     if (!el) return;
-
-    let user;
     try {
-        user = await apiFetch('/users/profile');
+        const user = await apiFetch('/users/profile');
+        if (!user.es_trabajador) { el.innerHTML = ''; return; }
+        const state = await fetchPlanState();
+        el.innerHTML = premiumCard(user, state);
+        bindPlanButtons(user);
     } catch {
         el.innerHTML = '';
-        return;
     }
-
-    // Antes: user.rol !== 'trabajador' (rol fijo). Con la dualidad de
-    // roles, un usuario puede ser cliente Y trabajador a la vez — lo que
-    // importa acá es si tiene el perfil de trabajador activo, no si
-    // "es" exclusivamente trabajador.
-    if (!user.es_trabajador) {
-        el.innerHTML = '';
-        return;
-    }
-
-    if (user.plan === 'premium' && user.plan_expira) {
-        el.innerHTML = `
-            <div class="task-card">
-                <p class="task-card__title">⭐ Plan Premium activo</p>
-                <p class="task-card__meta" style="margin-top:4px">Vence el ${escapeHtml(formatDate(user.plan_expira))}</p>
-            </div>
-        `;
-        return;
-    }
-
-    // Antes el precio de hacerse premium sólo se veía DESPUÉS de tocar el
-    // botón (en el toast de confirmación) — el usuario no sabía cuánto
-    // costaba hasta comprometerse. Se muestra acá de entrada.
-    const pricing = await getPricing();
-    const precioTexto = pricing
-        ? `$${pricing.premium.precio} ${pricing.moneda} / ${pricing.premium.dias} días`
-        : 'Precio no disponible por ahora';
-
-    el.innerHTML = `
-        <div class="task-card">
-            <p class="task-card__title">Plan gratis</p>
-            <p class="task-card__meta" style="margin:6px 0 10px">
-                Postulaciones limitadas por semana y radio de búsqueda reducido.
-                Hazte Premium para postularte sin límite y ver tareas más lejos.
-            </p>
-            <p class="task-card__meta" style="margin-bottom:10px"><strong class="mono">${escapeHtml(precioTexto)}</strong></p>
-            <button id="subscribePremiumBtn" class="btn btn-accent btn-block btn-sm">Hazte Premium — ${escapeHtml(precioTexto)}</button>
-        </div>
-    `;
-
-    document.getElementById('subscribePremiumBtn')?.addEventListener('click', async (e) => {
-        const btn = e.currentTarget;
-        const ok = await showConfirm({
-            title: 'Hazte Premium',
-            message: `Se creará una solicitud de pago por ${precioTexto}. Un administrador la confirma manualmente tras recibir el pago.`,
-            confirmLabel: 'Solicitar'
-        });
-        if (!ok) return;
-
-        btn.disabled = true;
-        try {
-            const payment = await apiFetch('/payments/subscribe', { method: 'POST' });
-            notify(`Solicitud enviada (pago #${payment.id.slice(0, 8)}). ${payment.notas}`, 'info');
-        } catch (err) {
-            notify(`Error: ${err.message}`, 'error');
-        } finally {
-            btn.disabled = false;
-        }
-    });
 }
 
-// ---------- Destacar una tarea (llamado desde tasks.js) ----------
+function bindPlanButtons(user) {
+    document.getElementById('premiumPromoteBtn')?.addEventListener('click', openPromotionalAdForm);
+    document.getElementById('myPromotionalAdsBtn')?.addEventListener('click', showMyPromotionalAds);
+    document.getElementById('upgradePremiumBtn')?.addEventListener('click', showPremiumUpsell);
+}
+
+async function showPremiumUpsell() {
+    const pricing = await getPricing();
+    const p = pricing?.premium;
+    const label = p ? `$${p.precio} ${pricing.moneda} / ${p.dias} días` : 'precio disponible al solicitar';
+    const ok = await showConfirm({ title: '⭐ Más alcance con PREMIUM', message: `Con PREMIUM puedes publicar hasta 10 servicios al día, alcanzar clientes en un radio de 20 km y crear anuncios promocionales. ${label}.`, confirmLabel: 'Solicitar PREMIUM' });
+    if (!ok) return;
+    try {
+        const payment = await apiFetch('/payments/subscribe', { method: 'POST' });
+        notify(`Solicitud enviada. ${payment.notas || 'Un administrador confirmará el pago.'}`, 'success');
+    } catch (err) { notify(err.message || 'No se pudo solicitar PREMIUM.', 'error'); }
+}
+
+async function openPromotionalAdForm() {
+    const result = await showFormModal({
+        title: '📣 Crear anuncio promocional', confirmLabel: 'Crear anuncio', fields: [
+            { name: 'titulo', label: 'Título', type: 'text', required: true, placeholder: 'Ej: Electricista disponible hoy' },
+            { name: 'descripcion', label: 'Descripción', type: 'textarea', required: true, placeholder: 'Describe tu servicio y por qué elegirte' },
+            { name: 'imagen', label: 'URL de imagen (opcional)', type: 'text', placeholder: 'https://...' },
+            { name: 'precio_servicio', label: 'Precio del servicio (CUP)', type: 'number', min: 0, required: true },
+            { name: 'contacto', label: 'Teléfono de contacto (opcional)', type: 'text' },
+            { name: 'categoria_id', label: 'ID de categoría (opcional)', type: 'number', min: 1 }
+        ]
+    });
+    if (result === null) return;
+    try {
+        const payload = {
+            titulo: String(result.titulo || '').trim(), descripcion: String(result.descripcion || '').trim(),
+            imagen: String(result.imagen || '').trim() || null, precio_servicio: Number(result.precio_servicio),
+            contacto: String(result.contacto || '').trim() || null,
+            categoria_id: result.categoria_id ? Number(result.categoria_id) : null
+        };
+        const ad = await apiFetch('/ads/promotional', { method: 'POST', body: JSON.stringify(payload) });
+        notify(`Anuncio creado y pendiente de pago. Estado: ${ad.estado || 'pendiente_pago'}.`, 'success');
+        showMyPromotionalAds();
+    } catch (err) { notify(err.message || 'No se pudo crear el anuncio.', 'error'); }
+}
+
+async function showMyPromotionalAds() {
+    const el = document.getElementById('premiumSection');
+    if (!el) return;
+    el.innerHTML = '<div class="task-card"><p class="task-card__meta">Cargando anuncios…</p></div>';
+    try {
+        const ads = await apiFetch('/ads/mine');
+        const rows = ads.length ? ads.map(ad => `<div class="task-card"><div class="task-card__row"><strong>${escapeHtml(ad.titulo || ad.marca || 'Anuncio')}</strong><span class="chip">${escapeHtml(ad.estado || 'pendiente')}</span></div><p class="task-card__meta">${escapeHtml(ad.texto || '')}</p><p class="task-card__meta">${ad.precio_servicio != null ? `${escapeHtml(String(ad.precio_servicio))} CUP` : ''}</p></div>`).join('') : '<div class="task-card"><p class="task-card__meta">Todavía no tienes anuncios promocionales.</p></div>';
+        el.innerHTML = `<div class="view-header-row"><h3 class="task-card__title">Mis anuncios</h3><button id="premiumPromoteBtn" class="btn btn-accent btn-sm">+ Crear</button></div><div class="stack-sm">${rows}</div><button id="premiumBackBtn" class="btn btn-secondary btn-block btn-sm">Volver a beneficios</button>`;
+        document.getElementById('premiumPromoteBtn')?.addEventListener('click', openPromotionalAdForm);
+        document.getElementById('premiumBackBtn')?.addEventListener('click', renderPremiumSection);
+    } catch (err) { el.innerHTML = '<p class="empty-state">No pudimos cargar tus anuncios.</p>'; notify(err.message || 'Error cargando anuncios.', 'error'); }
+}
 
 export async function requestFeatureTask(taskId) {
     const pricing = await getPricing();
-    const precioTexto = pricing
-        ? `$${pricing.tarea_destacada.precio} ${pricing.moneda} por ${pricing.tarea_destacada.dias} días`
-        : 'precio no disponible por ahora';
-
-    const ok = await showConfirm({
-        title: 'Destacar esta publicación',
-        message: `Aparecerá primero en los resultados de búsqueda cercana. Costo: ${precioTexto}.`,
-        confirmLabel: 'Solicitar'
-    });
+    const p = pricing?.tarea_destacada;
+    const label = p ? `$${p.precio} ${pricing.moneda} por ${p.dias} días` : 'el precio vigente';
+    const ok = await showConfirm({ title: 'Destacar esta publicación', message: `Este es un servicio extra independiente del plan PREMIUM. Costo: ${label}.`, confirmLabel: 'Solicitar' });
     if (!ok) return;
-
-    try {
-        const payment = await apiFetch(`/payments/feature-task/${encodeURIComponent(taskId)}`, { method: 'POST' });
-        notify(`Solicitud enviada (pago #${payment.id.slice(0, 8)}). ${payment.notas}`, 'info');
-    } catch (err) {
-        notify(`Error: ${err.message}`, 'error');
-    }
+    try { const payment = await apiFetch(`/payments/feature-task/${encodeURIComponent(taskId)}`, { method: 'POST' }); notify(`Solicitud enviada. ${payment.notas || ''}`, 'success'); }
+    catch (err) { notify(err.message || 'No se pudo solicitar el destacado.', 'error'); }
 }
 
-// ---------- Solicitar patrocinar un anuncio ----------
+function installProfileObserver() {
+    if (observerInstalled) return;
+    observerInstalled = true;
+    const target = document.getElementById('perfilView');
+    if (!target) return;
+    new MutationObserver(() => {
+        if (!target.classList.contains('hidden') && document.getElementById('premiumSection')?.innerHTML.trim() === '') renderPremiumSection();
+    }).observe(target, { attributes: true, attributeFilter: ['class'] });
+}
 
 export function initSponsorAdEntry() {
     document.getElementById('sponsorAdBtn')?.addEventListener('click', async () => {
         const pricing = await getPricing();
-        const precioDia = pricing ? pricing.anuncio.precio_por_dia : null;
-        const precioLabel = precioDia != null
-            ? `Días de duración (US$${precioDia}/día)`
-            : 'Días de duración';
-
-        const result = await showFormModal({
-            title: precioDia != null ? `Anunciar tu negocio — US$${precioDia}/día` : 'Anunciar tu negocio',
-            confirmLabel: 'Solicitar',
-            fields: [
-                { name: 'marca', label: 'Nombre de tu marca/negocio', type: 'text', required: true },
-                { name: 'texto', label: 'Texto del anuncio', type: 'textarea', required: true, placeholder: 'Ej: 20% de descuento esta semana' },
-                { name: 'url_destino', label: 'Enlace (opcional)', type: 'text', placeholder: 'https://...' },
-                { name: 'contacto', label: 'Teléfono / WhatsApp de contacto (opcional si pones un enlace)', type: 'text', placeholder: 'Ej: 53512345' },
-                { name: 'dias', label: precioLabel, type: 'number', min: 1, required: true, value: 7 }
-            ]
-        });
-        if (result === null) return;
-
-        if (!result.url_destino && !result.contacto) {
-            notify('Agrega un enlace o un teléfono/WhatsApp de contacto.', 'error');
-            return;
-        }
-
-        try {
-            const payment = await apiFetch('/payments/sponsor-ad', {
-                method: 'POST',
-                body: JSON.stringify({
-                    marca: result.marca,
-                    texto: result.texto,
-                    url_destino: result.url_destino || null,
-                    contacto: result.contacto || null,
-                    dias: Math.trunc(result.dias)
-                })
-            });
-            notify(`Solicitud enviada — total $${payment.monto} ${payment.moneda}. ${payment.notas}`, 'info');
-        } catch (err) {
-            notify(`Error: ${err.message}`, 'error');
-        }
+        const p = pricing?.anuncio;
+        const result = await showFormModal({ title: 'Anunciar tu negocio', confirmLabel: 'Solicitar', fields: [
+            { name: 'marca', label: 'Nombre del negocio', type: 'text', required: true },
+            { name: 'texto', label: 'Texto del anuncio', type: 'textarea', required: true },
+            { name: 'url_destino', label: 'Enlace (opcional)', type: 'text' },
+            { name: 'contacto', label: 'Teléfono / WhatsApp', type: 'text' },
+            { name: 'dias', label: p ? `Días (US$${p.precio_por_dia}/día)` : 'Días', type: 'number', min: 1, required: true, value: 7 }
+        ] });
+        if (!result) return;
+        try { const payment = await apiFetch('/payments/sponsor-ad', { method: 'POST', body: JSON.stringify({ ...result, dias: Math.trunc(result.dias) }) }); notify(`Solicitud enviada — ${payment.notas || ''}`, 'success'); }
+        catch (err) { notify(err.message || 'No se pudo solicitar el anuncio.', 'error'); }
     });
-}
-
-// ---------- Banner de anuncio de marca ----------
-// Antes loadAdBanner() se llamaba UNA sola vez al entrar a la vista y el
-// banner quedaba fijo ahí para siempre — la única forma de ver otro
-// anuncio patrocinado era recargar toda la página (F5). Ahora rota solo,
-// pidiendo un anuncio nuevo cada AD_ROTATION_MS mientras el contenedor
-// siga existiendo Y esté realmente visible en pantalla.
-//
-// El "realmente visible" importa porque GET /ads/active cuenta una
-// impresión en el servidor CADA VEZ que se llama (ver routers/ads.py) —
-// si siguiéramos pidiendo en segundo plano mientras el usuario está en
-// otra vista (chat, perfil, etc.), el contador de impresiones que ve el
-// anunciante quedaría inflado con vistas que nunca ocurrieron.
-
-const AD_ROTATION_MS = 25000;
-// containerId -> intervalId, para poder cancelar un timer anterior si
-// loadAdBanner se vuelve a llamar sobre el mismo contenedor (evita
-// timers duplicados acumulándose en cada cambio de modo/vista).
-const _adRotationTimers = new Map();
-
-// containerId -> Set de ids de anuncio ya mostrados en el ciclo actual.
-// Se manda como ?excluir=id1,id2,... para que el backend elija entre los
-// que faltan (ver GET /ads/active en routers/ads.py) — así no se repite
-// un anuncio hasta que se hayan mostrado todos los activos.
-const _adShownIds = new Map();
-
-function isElementVisible(el) {
-    // offsetParent es null cuando el elemento (o un ancestro) tiene
-    // display:none — que es exactamente cómo se ocultan las vistas acá
-    // (.hidden { display: none !important }, ver style.css). Los
-    // contenedores de vista NUNCA se sacan del DOM, sólo se ocultan, así
-    // que document.getElementById seguiría encontrándolos aunque el
-    // usuario esté mirando otra pantalla.
-    return !!el && el.offsetParent !== null;
-}
-
-async function fetchAndRenderAd(containerId, categoryId) {
-    const container = document.getElementById(containerId);
-    if (!container) return;
-
-    const shown = _adShownIds.get(containerId) || new Set();
-
-    const searchParams = new URLSearchParams();
-    if (categoryId) searchParams.set('category_id', categoryId);
-    if (shown.size) searchParams.set('excluir', [...shown].join(','));
-    const qs = searchParams.toString();
-
-    let ad;
-    try {
-        ad = await apiFetch(`/ads/active${qs ? `?${qs}` : ''}`);
-    } catch {
-        container.innerHTML = '';
-        return;
-    }
-
-    if (!ad) {
-        container.innerHTML = '';
-        return;
-    }
-
-    if (shown.has(ad.id)) {
-        // El backend ya reinició el ciclo (mostró todos los que
-        // teníamos anotados) — empezamos un ciclo de exclusión nuevo
-        // desde este anuncio, en vez de seguir arrastrando el anterior.
-        shown.clear();
-    }
-    shown.add(ad.id);
-    _adShownIds.set(containerId, shown);
-
-    // Antes: toda la tarjeta era clickeable para abrir url_destino, con
-    // sólo un link de texto para el teléfono — poco profesional y con
-    // affordance ambigua (¿qué parte del texto es "el botón"?). Ahora
-    // hay un avatar con la inicial de la marca y botones de acción
-    // explícitos, como cualquier tarjeta de anuncio real.
-    const inicial = (ad.marca || '').trim().charAt(0).toUpperCase() || '★';
-
-    container.innerHTML = `
-        <div class="ad-banner" role="complementary" aria-label="Anuncio patrocinado">
-            <div class="ad-banner__header">
-                <span class="ad-banner__avatar">${escapeHtml(inicial)}</span>
-                <div class="ad-banner__headerText">
-                    <span class="ad-banner__tag">Patrocinado</span>
-                    <p class="ad-banner__brand">${escapeHtml(ad.marca)}</p>
-                </div>
-            </div>
-            <p class="ad-banner__text">${escapeHtml(ad.texto)}</p>
-            <div class="ad-banner__actions">
-                ${ad.contacto ? `<a class="ad-banner__cta ad-banner__cta--ghost" href="tel:${escapeHtml(ad.contacto)}">📞 Llamar</a>` : ''}
-                ${ad.url_destino ? `<button type="button" class="ad-banner__cta" data-role="ad-cta">Ver más →</button>` : ''}
-            </div>
-        </div>
-    `;
-
-    if (ad.url_destino) {
-        container.querySelector('[data-role="ad-cta"]')?.addEventListener('click', async () => {
-            try {
-                const { url_destino } = await apiFetch(`/ads/${ad.id}/click`, { method: 'POST' });
-                if (url_destino) window.open(url_destino, '_blank', 'noopener');
-            } catch {
-                // fallo silencioso — no bloquea la navegación del usuario
-            }
-        });
-    }
+    installProfileObserver();
+    document.addEventListener('servicuba:premium-upsell', showPremiumUpsell);
 }
 
 export async function loadAdBanner(containerId, categoryId = null) {
     const container = document.getElementById(containerId);
     if (!container) return;
-
-    await fetchAndRenderAd(containerId, categoryId);
-
-    // Si ya había un timer de rotación corriendo para este mismo
-    // contenedor (ej. el usuario cambió de modo Cliente/Trabajador y
-    // volvió), lo cancelamos antes de crear uno nuevo.
-    if (_adRotationTimers.has(containerId)) {
-        clearInterval(_adRotationTimers.get(containerId));
-        _adRotationTimers.delete(containerId);
-    }
-
-    const intervalId = setInterval(() => {
-        const el = document.getElementById(containerId);
-        if (!el) {
-            // La vista ya no existe (no debería pasar, pero por las
-            // dudas) — dejamos de sondear.
-            clearInterval(intervalId);
-            _adRotationTimers.delete(containerId);
-            return;
-        }
-        if (!isElementVisible(el)) {
-            // El usuario está en otra vista ahora mismo: no pedimos el
-            // anuncio (evita inflar impresiones), pero seguimos el
-            // timer corriendo para retomar solo cuando vuelva.
-            return;
-        }
-        fetchAndRenderAd(containerId, categoryId);
-    }, AD_ROTATION_MS);
-    _adRotationTimers.set(containerId, intervalId);
+    try {
+        const q = categoryId ? `?category_id=${encodeURIComponent(categoryId)}` : '';
+        const ad = await apiFetch(`/ads/active${q}`);
+        if (!ad) { container.innerHTML = ''; return; }
+        container.innerHTML = `<div class="ad-banner"><span class="ad-banner__tag">Patrocinado</span><strong>${escapeHtml(ad.marca || ad.titulo || '')}</strong><p>${escapeHtml(ad.texto || '')}</p>${ad.precio_servicio != null ? `<span>${escapeHtml(String(ad.precio_servicio))} CUP</span>` : ''}</div>`;
+    } catch { container.innerHTML = ''; }
 }
