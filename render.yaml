@@ -1,15 +1,14 @@
 # Base de datos: Neon (no Render Postgres) — el plan free de Render borra
 # la base de datos administrada a los 30 días; el free tier de Neon
 # persiste indefinidamente (el cómputo "escala a cero" tras ~5 min sin
-# uso y se reactiva solo en la siguiente conexión, en general en menos
-# de un segundo). Ver README > "Base de datos (Neon)" para cómo crear el
-# proyecto y obtener la cadena de conexión correcta.
+# uso y se reactiva solo en la siguiente conexión).
 services:
   - type: web
     name: servicios-api
     runtime: python
     buildCommand: python frontend/seo/generate_pages.py && rm -rf frontend/servicios && cp -r public-seo/servicios frontend/servicios && cp public-seo/sitemap.xml frontend/sitemap.xml && pip install -r backend/requirements.txt && alembic -c backend/alembic.ini upgrade head
     startCommand: uvicorn backend.app.main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /health
     envVars:
       - key: DATABASE_URL
         sync: false
