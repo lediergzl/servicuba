@@ -18,6 +18,10 @@
   .app-shell { max-width: 1100px; }
   .app-main { width: 100%; max-width: 520px; margin-inline: auto; padding-bottom: 92px; }
   .bottom-nav { display: flex !important; }
+  /* Excepción: en la landing pública el layout es de ancho completo y
+     bottom-nav (pensado para la columna angosta de 520px del dashboard)
+     queda flotando como una caja fuera de lugar. Se oculta solo ahí. */
+  body:has(#landing:not(.hidden)) .bottom-nav { display: none !important; }
 }
 @media (max-width: 760px) {
   .app-header { position: sticky; }
