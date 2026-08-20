@@ -2,9 +2,10 @@ import { apiFetch, notify, showFormModal, showConfirm, escapeHtml } from './core
 
 let pricingCache = null;
 let observerInstalled = false;
-let premiumOpportunityObserverInstalled = false;
 let premiumOpportunityUserCache = null;
 let premiumOpportunityUserCacheAt = 0;
+let premiumOpportunityRequest = null;
+let premiumOpportunityRenderQueued = false;
 
 function formatDate(iso) {
     return iso ? new Date(iso).toLocaleDateString('es-CU', { day: 'numeric', month: 'short', year: 'numeric' }) : '';
@@ -42,10 +43,10 @@ async function fetchPlanState() {
 
 export async function renderPremiumSection() {
     const el = document.getElementById('premiumSection');
-    if (!el) return;
+    if (!el || !localStorage.getItem('token')) return;
     try {
-        const user = await apiFetch('/users/profile');
-        if (!user.es_trabajador) { el.innerHTML = ''; return; }
+        const user = await getCachedPremiumWorker({ allowAnyWorker: true });
+        if (!user?.es_trabajador) { el.innerHTML = ''; return; }
         const state = await fetchPlanState();
         el.innerHTML = premiumCard(user, state);
         bindPlanButtons(user);
@@ -54,7 +55,7 @@ export async function renderPremiumSection() {
     }
 }
 
-function bindPlanButtons(user) {
+function bindPlanButtons() {
     document.getElementById('premiumPromoteBtn')?.addEventListener('click', openPromotionalAdForm);
     document.getElementById('myPromotionalAdsBtn')?.addEventListener('click', showMyPromotionalAds);
     document.getElementById('upgradePremiumBtn')?.addEventListener('click', showPremiumUpsell);
@@ -126,22 +127,32 @@ function installProfileObserver() {
     const target = document.getElementById('perfilView');
     if (!target) return;
     new MutationObserver(() => {
-        if (!target.classList.contains('hidden') && document.getElementById('premiumSection')?.innerHTML.trim() === '') renderPremiumSection();
+        if (!target.classList.contains('hidden') && document.getElementById('premiumSection')?.innerHTML.trim() === '') {
+            queuePremiumRefresh();
+        }
     }).observe(target, { attributes: true, attributeFilter: ['class'] });
 }
 
-async function getCachedPremiumWorker() {
+async function getCachedPremiumWorker(options = {}) {
     if (!localStorage.getItem('token')) return null;
     const now = Date.now();
-    if (premiumOpportunityUserCache && now - premiumOpportunityUserCacheAt < 30000) return premiumOpportunityUserCache;
-    try {
-        const user = await apiFetch('/users/profile');
-        premiumOpportunityUserCache = effectivePlan(user) === 'premium' && Boolean(user.es_trabajador) ? user : null;
-        premiumOpportunityUserCacheAt = now;
-        return premiumOpportunityUserCache;
-    } catch {
-        return null;
+    const allowAnyWorker = Boolean(options.allowAnyWorker);
+    if (premiumOpportunityUserCache && now - premiumOpportunityUserCacheAt < 30000) {
+        return allowAnyWorker || effectivePlan(premiumOpportunityUserCache) === 'premium' ? premiumOpportunityUserCache : null;
     }
+    if (!premiumOpportunityRequest) {
+        premiumOpportunityRequest = apiFetch('/users/profile')
+            .then(user => {
+                premiumOpportunityUserCache = user;
+                premiumOpportunityUserCacheAt = Date.now();
+                return user;
+            })
+            .catch(() => null)
+            .finally(() => { premiumOpportunityRequest = null; });
+    }
+    const user = await premiumOpportunityRequest;
+    if (!user) return null;
+    return allowAnyWorker || (effectivePlan(user) === 'premium' && Boolean(user.es_trabajador)) ? user : null;
 }
 
 async function renderPremiumOpportunityPanel() {
@@ -167,15 +178,25 @@ async function renderPremiumOpportunityPanel() {
     banner.classList.remove('hidden');
 }
 
+function queuePremiumRefresh() {
+    if (premiumOpportunityRenderQueued) return;
+    premiumOpportunityRenderQueued = true;
+    requestAnimationFrame(() => {
+        premiumOpportunityRenderQueued = false;
+        renderPremiumOpportunityPanel().catch(() => {});
+        const profileView = document.getElementById('perfilView');
+        if (profileView && !profileView.classList.contains('hidden')) renderPremiumSection();
+    });
+}
+
 function installPremiumOpportunityPanel() {
-    if (premiumOpportunityObserverInstalled) return;
-    premiumOpportunityObserverInstalled = true;
-    const check = () => { if (document.getElementById('tareasCercanasPanel')) renderPremiumOpportunityPanel(); };
-    const observer = new MutationObserver(check);
-    observer.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ['class'] });
-    document.addEventListener('servicuba:premium-opportunities-refresh', check);
-    check();
-    window.setInterval(check, 5000);
+    document.addEventListener('servicuba:premium-opportunities-refresh', () => {
+        premiumOpportunityUserCache = null;
+        premiumOpportunityUserCacheAt = 0;
+        queuePremiumRefresh();
+    });
+    document.addEventListener('servicuba:auth-ready', () => queuePremiumRefresh());
+    document.addEventListener('servicuba:view-changed', () => queuePremiumRefresh());
 }
 
 export function initSponsorAdEntry() {
