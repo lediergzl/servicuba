@@ -74,13 +74,30 @@ def create_task(task: TaskCreate, db: Session = Depends(get_db), current_user: U
 
 @router.get("/nearby")
 def get_nearby_tasks(lat: float = Query(...), lng: float = Query(...), radius_km: float = Query(3.0, ge=0.1, le=50), category_id: Optional[int] = None, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
-    radio_max = PLAN_PREMIUM_RADIO_MAX_KM if is_premium_active(current_user) else PLAN_GRATIS_RADIO_MAX_KM
+    premium = is_premium_active(current_user)
+    radio_max = PLAN_PREMIUM_RADIO_MAX_KM if premium else PLAN_GRATIS_RADIO_MAX_KM
     radius_m = min(radius_km, radio_max) * 1000
     point = ST_SetSRID(ST_MakePoint(lng, lat), 4326); geo_task = cast(Task.ubicacion, Geography); geo_point = cast(point, Geography); now = datetime.utcnow()
     query = db.query(Task, ST_Distance(geo_task, geo_point).label("distance"), ST_Y(Task.ubicacion).label("task_lat"), ST_X(Task.ubicacion).label("task_lng")).filter(Task.estado == TaskStatus.ACTIVA, Task.tipo == "necesidad", ST_DWithin(geo_task, geo_point, radius_m))
     if category_id: query = query.filter(Task.categoria_id == category_id)
+
+    # PREMIUM no sólo recibe más oportunidades: dentro de su radio,
+    # las oportunidades comerciales de mayor valor aparecen primero.
+    # La misma regla de "mejor oportunidad" usada por la ventana de acceso
+    # se refleja aquí para que el beneficio sea visible en la lista.
     destacada_pagada = (Task.destacada == True) & (Task.destacada_hasta > now)  # noqa: E712
-    results = query.order_by(destacada_pagada.desc(), Task.created_at.desc(), "distance").limit(100).all()
+    presupuesto_alto = func.coalesce(Task.precio, 0) >= 2000
+    if premium:
+        results = query.order_by(
+            (destacada_pagada | presupuesto_alto).desc(),
+            destacada_pagada.desc(),
+            presupuesto_alto.desc(),
+            Task.created_at.desc(),
+            "distance",
+        ).limit(100).all()
+    else:
+        results = query.order_by(destacada_pagada.desc(), Task.created_at.desc(), "distance").limit(100).all()
+
     visible = []
     for task, dist, task_lat, task_lng in results:
         if current_user.es_trabajador and not has_priority_access(current_user, task, now):
