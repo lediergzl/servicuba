@@ -86,6 +86,19 @@ def get_nearby_tasks(lat: float = Query(...), lng: float = Query(...), radius_km
         if current_user.es_trabajador and not has_priority_access(current_user, task, now):
             continue
         visible.append(_task_payload(task, dist, task_lat, task_lng, current_user, now))
+
+    # El beneficio Premium no es sólo recibir antes la notificación:
+    # dentro del panel las mejores oportunidades deben aparecer primero.
+    # La ventana de acceso anticipado también se coloca arriba para que
+    # el trabajador Premium vea inmediatamente aquello que acaba de abrirse.
+    if is_premium_active(current_user):
+        visible.sort(key=lambda item: (
+            item.get("priority") != "best",
+            not item.get("premium_early_access", False),
+            not item.get("destacada", False),
+            item.get("created_at") or datetime.min,
+            item.get("distancia_km", 999999),
+        ))
     return visible[:50]
 
 
