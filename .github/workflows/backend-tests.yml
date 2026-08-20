@@ -22,6 +22,9 @@ jobs:
       ACCESS_TOKEN_EXPIRE_MINUTES: 30
       REFRESH_TOKEN_EXPIRE_DAYS: 7
       VAPID_CLAIM_EMAIL: mailto:test@example.invalid
+      # Los tests históricos usan ambos estilos de importación: app.* y backend.app.*.
+      # Exponer las dos raíces evita errores de colección sin cambiar el código de producción.
+      PYTHONPATH: ${{ github.workspace }}:${{ github.workspace }}/backend
     steps:
       - name: Checkout
         uses: actions/checkout@v4
