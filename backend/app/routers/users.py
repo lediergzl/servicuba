@@ -15,7 +15,14 @@ router = APIRouter()
 
 @router.get('/profile', response_model=UserResponse)
 def get_profile(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    return build_user_response(db, current_user)
+    # Prueba de aislamiento de rendimiento: la restauración de sesión y el
+    # perfil nunca deben depender de una descarga externa de Cloudinary.
+    # La foto se conserva en la base de datos, pero temporalmente no se entrega
+    # en esta respuesta para comprobar si la carga de imagen participa en el
+    # bloqueo observado después del login.
+    response = build_user_response(db, current_user)
+    response.foto = None
+    return response
 
 @router.put('/foto', response_model=UserResponse)
 def actualizar_foto_perfil(body: FotoPerfilRequest, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
