@@ -285,7 +285,63 @@ select.field-input:hover,select.field-input:focus-visible{border-color:var(--cop
   cursor: pointer;
 }
 
-/* ---- Estados vacíos / error ---- */
+/* ---- Banner de anuncio patrocinado (loadAdBanner en monetization.js) ----
+   Deliberadamente distinto de .task-card (borde punteado + fondo tenue en
+   cobre) para que se lea como "esto es publicidad", nunca confundible con
+   una tarea o servicio real de la plataforma. */
+.ad-banner {
+  position: relative;
+  display: block;
+  width: 100%;
+  margin-bottom: 12px;
+  padding: 13px 15px 14px;
+  background: color-mix(in srgb, var(--copper) 6%, var(--paper-raised));
+  border: 1.5px dashed color-mix(in srgb, var(--copper) 45%, var(--line));
+  border-radius: var(--radius-md);
+  text-align: left;
+  cursor: pointer;
+  transition: border-color .15s var(--ease), transform .12s var(--ease), box-shadow .15s var(--ease);
+}
+.ad-banner:hover, .ad-banner:focus-visible {
+  border-color: var(--copper);
+  box-shadow: var(--shadow-card);
+  transform: translateY(-1px);
+  outline: none;
+}
+.ad-banner:active { transform: translateY(0); }
+.ad-banner__tag {
+  display: inline-block;
+  margin-bottom: 6px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--copper);
+  color: #fff;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+}
+.ad-banner__title {
+  display: block;
+  font-family: var(--font-display);
+  font-weight: 800;
+  font-size: 16px;
+  color: var(--ink);
+  margin-bottom: 3px;
+}
+.ad-banner__text {
+  margin: 0 0 6px;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.4;
+}
+.ad-banner__price {
+  display: inline-block;
+  font-family: var(--font-mono);
+  font-weight: 700;
+  font-size: 12px;
+  color: var(--copper);
+}
 .empty-state {
   margin: 18px 0;
   padding: 20px 16px;

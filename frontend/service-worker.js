@@ -1,7 +1,7 @@
-// v18: pasada de diseño "workshop premium" (textura, botones táctiles,
-// tipografía de marca en tarjetas, sub-tabs segmentadas).
+// v19: fix — los anuncios aprobados nunca se mostraban a los usuarios
+// porque loadAdBanner() nunca se invocaba desde ningún lado.
 // Nunca devolvemos undefined desde un fetch handler.
-const CACHE_VERSION = 'v18';
+const CACHE_VERSION = 'v19';
 const CACHE_NAME = `servicuba-${CACHE_VERSION}`;
 
 const CORE_URLS = [

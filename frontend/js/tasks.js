@@ -10,7 +10,7 @@ import {
     getGeolocation, geolocationErrorMessage, ensureUiRoot
 } from './core.js';
 import { openChatForTask } from './chat.js';
-import { requestFeatureTask } from './monetization.js';
+import { requestFeatureTask, loadAdBanner } from './monetization.js';
 
 // Evita que dos cargas de "cercanas" (tareas u ofertas) se pisen entre sí.
 let nearbyTasksAbortController = null;
@@ -144,6 +144,11 @@ export async function loadNearbyTasks() {
     const radius = document.getElementById('filtroRadio')?.value || 3;
     const category = document.getElementById('filtroCategoria')?.value || '';
 
+    // El banner de anuncios se carga en paralelo, sin bloquear la lista de
+    // tareas: un anuncio patrocinado nunca debe hacer esperar el contenido
+    // principal ni bloquear la carga si el endpoint falla.
+    loadAdBanner('adBannerTrabajador', category || null).catch(() => {});
+
     const params = new URLSearchParams({ lat, lng, radius_km: radius });
     if (category) params.set('category_id', category);
 
@@ -263,6 +268,8 @@ export async function loadNearbyOfertas() {
     const lng = pos.coords.longitude;
     const radius = document.getElementById('filtroRadioOfertas')?.value || 3;
     const category = document.getElementById('filtroCategoriaOfertas')?.value || '';
+
+    loadAdBanner('adBannerCliente', category || null).catch(() => {});
 
     const params = new URLSearchParams({ lat, lng, radius_km: radius });
     if (category) params.set('category_id', category);

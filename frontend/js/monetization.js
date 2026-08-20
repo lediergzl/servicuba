@@ -219,13 +219,49 @@ export function initSponsorAdEntry() {
     document.addEventListener('servicuba:premium-upsell', showPremiumUpsell);
 }
 
+// Recuerda el último anuncio mostrado por contenedor (en memoria, dura la
+// sesión de la pestaña) para pasarlo como `excluir` en la próxima carga —
+// el backend ya soporta rotación (_elegir_sin_repetir en ads.py) pero
+// nadie le estaba pasando el parámetro, así que siempre mostraba lo mismo.
+const _lastShownAdId = {};
+
 export async function loadAdBanner(containerId, categoryId = null) {
     const container = document.getElementById(containerId);
     if (!container) return;
     try {
-        const q = categoryId ? `?category_id=${encodeURIComponent(categoryId)}` : '';
-        const ad = await apiFetch(`/ads/active${q}`);
-        if (!ad) { container.innerHTML = ''; return; }
-        container.innerHTML = `<div class="ad-banner"><span class="ad-banner__tag">Patrocinado</span><strong>${escapeHtml(ad.marca || ad.titulo || '')}</strong><p>${escapeHtml(ad.texto || '')}</p>${ad.precio_servicio != null ? `<span>${escapeHtml(String(ad.precio_servicio))} CUP</span>` : ''}</div>`;
+        const params = new URLSearchParams();
+        if (categoryId) params.set('category_id', categoryId);
+        if (_lastShownAdId[containerId]) params.set('excluir', _lastShownAdId[containerId]);
+        const qs = params.toString();
+        const ad = await apiFetch(`/ads/active${qs ? `?${qs}` : ''}`);
+        if (!ad) {
+            container.innerHTML = '';
+            delete _lastShownAdId[containerId];
+            return;
+        }
+        _lastShownAdId[containerId] = ad.id;
+        container.innerHTML = `
+            <div class="ad-banner" role="button" tabindex="0" data-ad-id="${escapeHtml(ad.id)}" aria-label="Anuncio patrocinado: ${escapeHtml(ad.marca || ad.titulo || '')}">
+                <span class="ad-banner__tag">Patrocinado</span>
+                <strong class="ad-banner__title">${escapeHtml(ad.marca || ad.titulo || '')}</strong>
+                ${ad.texto ? `<p class="ad-banner__text">${escapeHtml(ad.texto)}</p>` : ''}
+                ${ad.precio_servicio != null ? `<span class="ad-banner__price">${escapeHtml(String(ad.precio_servicio))} CUP</span>` : ''}
+            </div>
+        `;
+        const banner = container.querySelector('.ad-banner');
+        const activate = () => handleAdClick(ad.id);
+        banner?.addEventListener('click', activate);
+        banner?.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); activate(); } });
     } catch { container.innerHTML = ''; }
+}
+
+async function handleAdClick(adId) {
+    try {
+        const result = await apiFetch(`/ads/${encodeURIComponent(adId)}/click`, { method: 'POST' });
+        if (result?.url_destino) window.open(result.url_destino, '_blank', 'noopener');
+        else if (result?.contacto) notify(`Contacto del anunciante: ${result.contacto}`, 'info');
+        else notify('Gracias por tu interés en este anuncio.', 'info');
+    } catch (err) {
+        notify(err.message || 'No se pudo abrir el anuncio.', 'error');
+    }
 }
