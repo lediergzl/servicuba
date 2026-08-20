@@ -169,6 +169,11 @@ async function openMessagesView() {
 }
 
 function wireGlobalButtons() {
+    // Disparado desde plans-ui.js cuando alguien con sesión pero sin
+    // perfil de trabajador toca el CTA de un plan BASE/PREMIUM en el
+    // modal de planes — reutiliza openWorkerView() en vez de duplicar su
+    // lógica de sesión/redirección.
+    document.addEventListener('servicuba:open-worker-activation', () => runNavigation(openWorkerView));
     document.getElementById('loginBtn')?.addEventListener('click', () => runNavigation(showLogin));
     document.getElementById('loginBtn2')?.addEventListener('click', () => runNavigation(showLogin));
     document.getElementById('registerBtn')?.addEventListener('click', () => runNavigation(showRegister));
