@@ -19,3 +19,111 @@ select.field-input:hover,select.field-input:focus-visible{border-color:var(--cop
 #bottomNav .plan-cta,#bottomNav .plan-button,#bottomNav .show-plans,#bottomNav [data-action="plans"]{position:static!important;transform:none!important;inset:auto!important;z-index:auto!important;max-width:none!important;box-shadow:none!important;align-self:stretch!important}.plan-cta,.plan-button,.show-plans,[data-action="plans"]{max-width:100%}
 @media(max-width:390px){.app-main{padding-left:14px;padding-right:14px}.directory-item{padding:14px}.directory-item__top{align-items:flex-start;flex-direction:column;gap:3px}.directory-item__meta{gap:6px}.directory-item__meta span{font-size:11.5px}.view-title{font-size:25px}.map-box{height:360px;min-height:280px}}
 @media(prefers-reduced-motion:reduce){*{animation-duration:.001ms!important;transition-duration:.001ms!important}}
+
+/* ============================================================
+   Fix: componentes base que las plantillas de tasks.js/admin.js
+   ya usaban (task-card, chip, empty-state) pero que nunca habían
+   sido definidos aquí — por eso las listas se veían como texto
+   plano sin tarjetas, bordes ni pills de estado.
+   ============================================================ */
+
+/* ---- Tarjetas de tarea / oferta ---- */
+.task-card {
+  position: relative;
+  background: var(--paper-raised);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-card);
+  padding: 14px 16px;
+  animation: sc-card-in .28s var(--ease) both;
+  animation-delay: calc(var(--i, 0) * 40ms);
+}
+.task-card--featured {
+  border-color: var(--copper);
+  box-shadow: 0 0 0 1px var(--copper), var(--shadow-card);
+}
+@keyframes sc-card-in {
+  from { opacity: 0; transform: translateY(6px); }
+  to   { opacity: 1; transform: none; }
+}
+
+.task-card__row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+.task-card__title {
+  margin: 0;
+  font-size: 17px;
+  line-height: 1.2;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.task-card__price {
+  flex: 0 0 auto;
+  font-family: var(--font-mono);
+  font-weight: 700;
+  font-size: 14px;
+  color: var(--success);
+  white-space: nowrap;
+}
+.task-card__description {
+  margin: 8px 0 0;
+  color: var(--muted);
+  font-size: 13.5px;
+  line-height: 1.45;
+}
+.task-card__meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin: 10px 0 0;
+}
+.task-card__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+}
+.task-card__secondary-actions {
+  margin-top: 6px;
+  padding-top: 6px;
+  border-top: 1px dashed var(--line);
+}
+
+/* ---- Chips de estado / distancia ---- */
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11.5px;
+  font-weight: 600;
+  padding: 3px 9px;
+  border-radius: 999px;
+  background: var(--paper);
+  border: 1px solid var(--line);
+  color: var(--ink);
+  white-space: nowrap;
+}
+.chip--estado-activa      { color: var(--success); border-color: var(--success); background: #E7F3EE; }
+.chip--estado-asignada    { color: var(--copper);  border-color: var(--copper);  background: #FBEADD; }
+.chip--estado-en_proceso  { color: #8A6500;         border-color: #E9CE7A;        background: #FDF1D2; }
+.chip--estado-completada  { color: var(--muted);    border-color: var(--line); }
+.chip--estado-cancelada   { color: var(--brick);    border-color: var(--brick);   background: #FBE7E4; }
+.chip--estado-rechazada   { color: var(--brick);    border-color: var(--brick);   background: #FBE7E4; }
+
+/* ---- Estados vacíos / error ---- */
+.empty-state {
+  margin: 18px 0;
+  padding: 20px 16px;
+  text-align: center;
+  color: var(--muted);
+  font-size: 13.5px;
+  line-height: 1.5;
+  background: var(--paper-raised);
+  border: 1px dashed var(--line);
+  border-radius: var(--radius-md);
+}
