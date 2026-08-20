@@ -1,23 +1,25 @@
 // ============================================================
 // Núcleo compartido: fetch autenticado, UI (toasts/modales), geolocalización.
-// Optimizado para conexiones lentas: timeout, deduplicación y caché corta.
+// Optimizado para conexiones lentas: timeout, deduplicación, caché y fotos ligeras.
 // ============================================================
 import { isNativeApp, nativeGetCurrentPosition } from './native.js';
 export const API_BASE = '/api';
 export function escapeHtml(str){const d=document.createElement('div');d.textContent=str??'';return d.innerHTML;}
 function getAnonymousEntitlements(){return{plan:'gratis',plan_expira:null,es_cliente:false,es_trabajador:false,can_discover:true,can_contact:false,can_apply:false,can_publish_need:false,can_publish_service:false,services_daily_limit:0,max_radius_km:null,can_publish_ads:false,ads_daily_limit:0,priority_notifications:false,anonymous:true};}
 
-// GET idénticos no deben multiplicarse cuando varios componentes arrancan a la vez.
 const inflightGetRequests=new Map();
 const responseCache=new Map();
 const CACHE_TTL={
     '/applications/mine':15000,
     '/categories':300000,
     '/users/me':30000,
+    '/users/profile':60000,
     '/users/entitlements':30000
 };
 function cacheTtl(path){const base=path.split('?')[0];return CACHE_TTL[base]||0;}
 function cacheKey(url,token){return `${token||'anon'}:${url}`;}
+function getCached(path,token=localStorage.getItem('token')){const key=cacheKey(`${API_BASE}${path}`,token),cached=responseCache.get(key);return cached&&cached.expires>Date.now()?cached.data:null;}
+function putCached(path,data,ttl=cacheTtl(path),token=localStorage.getItem('token')){if(!ttl)return;responseCache.set(cacheKey(`${API_BASE}${path}`,token),{data,expires:Date.now()+ttl});}
 function createTimeoutSignal(options,timeoutMs){
     const controller=new AbortController();
     const timer=setTimeout(()=>controller.abort(new DOMException('Tiempo de espera agotado','TimeoutError')),timeoutMs);
@@ -46,7 +48,7 @@ export async function apiFetch(path,options={}){
             console.error('[ServiCuba API] Network error',{url,method,networkError});
             throw new Error('No se pudo conectar con el servidor. Revisa tu conexión.');
         }
-        if(res.status===401){if(token){localStorage.removeItem('token');notify('Tu sesión expiró. Inicia sesión de nuevo.','error');document.dispatchEvent(new CustomEvent('auth:expired'));}throw new Error('No autorizado');}
+        if(res.status===401){if(token){localStorage.removeItem('token');responseCache.clear();notify('Tu sesión expiró. Inicia sesión de nuevo.','error');document.dispatchEvent(new CustomEvent('auth:expired'));}throw new Error('No autorizado');}
         let data=null;const ct=res.headers.get('content-type')||'';if(ct.includes('application/json'))data=await res.json().catch(()=>null);
         if(!res.ok){const detail=data?.detail,validation=Array.isArray(detail)?detail.map(i=>({location:i.loc?.join('.')||'unknown',message:i.msg,type:i.type,input:i.input})):null;
             if(!(options.silentStatuses||[]).includes(res.status)){console.error('[ServiCuba API] Request failed',{url,status:res.status,method,response:data,validation});}
@@ -69,6 +71,32 @@ async function recoverGeolocation(error){let e=error;while(true){const saved=rea
 export async function getGeolocation(){const saved=readSavedLocation();if(saved)return toPosition(saved);if(isNativeApp())try{const p=await nativeGetCurrentPosition();if(p?.coords){const v={lat:Number(p.coords.latitude),lng:Number(p.coords.longitude),accuracy:p.coords.accuracy||null,source:'native-gps'};saveLocation(v);return toPosition(v);}}catch(e){console.warn('[ServiCuba] GPS nativo falló; usando navegador:',e);}try{return await requestBrowserGeolocation();}catch(e){return recoverGeolocation(e);}}
 export async function refreshGeolocation(){try{if(isNativeApp()){const p=await nativeGetCurrentPosition();if(p?.coords){const v={lat:Number(p.coords.latitude),lng:Number(p.coords.longitude),accuracy:p.coords.accuracy||null,source:'native-gps'};saveLocation(v);return toPosition(v);}}return await requestBrowserGeolocation();}catch(e){return recoverGeolocation(e);}}
 export function getSavedLocation(){const v=readSavedLocation();return v?toPosition(v):null;}export function geolocationErrorMessage(e){if(!e)return'No se pudo obtener tu ubicación.';switch(e.code){case 1:return'Activa el permiso de ubicación para continuar.';case 2:return'No se pudo determinar tu ubicación. Verifica el GPS.';case 3:return'La solicitud de ubicación tardó demasiado. Intenta de nuevo.';default:return e.message||'No se pudo obtener tu ubicación.';}}
-export async function uploadProfilePhoto(file){if(!file||!file.type?.startsWith('image/'))throw new Error('Selecciona un archivo de imagen válido.');if(file.size>8*1024*1024)throw new Error('La imagen no puede superar 8 MB.');const sig=await apiFetch('/uploads/signature?kind=profile');const form=new FormData();form.append('file',file);form.append('api_key',sig.api_key);form.append('timestamp',String(sig.timestamp));form.append('signature',sig.signature);form.append('folder',sig.folder);let res;try{res=await fetch(`https://api.cloudinary.com/v1_1/${sig.cloud_name}/image/upload`,{method:'POST',body:form});}catch{throw new Error('No se pudo conectar con el servicio de imágenes.');}const data=await res.json().catch(()=>null);if(!res.ok||!data?.secure_url)throw new Error(data?.error?.message||'No se pudo subir la foto.');const updated=await apiFetch('/users/foto',{method:'PUT',body:JSON.stringify({foto:data.secure_url})});return updated.foto;}
+
+async function optimizeProfileImage(file){
+    if(!file||!file.type?.startsWith('image/'))return file;
+    // Las fotos de perfil no necesitan resolución de cámara. Reducir antes del upload
+    // evita varios MB de transferencia y bloqueos perceptibles en redes móviles lentas.
+    if(file.size<=900*1024)return file;
+    if(!('createImageBitmap' in window))return file;
+    let bitmap;
+    try{bitmap=await createImageBitmap(file);}catch{return file;}
+    const maxSide=1280,scale=Math.min(1,maxSide/Math.max(bitmap.width,bitmap.height));
+    const width=Math.max(1,Math.round(bitmap.width*scale)),height=Math.max(1,Math.round(bitmap.height*scale));
+    const canvas=document.createElement('canvas');canvas.width=width;canvas.height=height;
+    const ctx=canvas.getContext('2d',{alpha:false});if(!ctx){bitmap.close?.();return file;}
+    ctx.drawImage(bitmap,0,0,width,height);bitmap.close?.();
+    const blob=await new Promise(resolve=>canvas.toBlob(resolve,'image/jpeg',0.82));
+    return blob&&blob.size<file.size?new File([blob],`${file.name.replace(/\.[^.]+$/,'')||'perfil'}.jpg`,{type:'image/jpeg'}):file;
+}
+export async function uploadProfilePhoto(file){
+    if(!file||!file.type?.startsWith('image/'))throw new Error('Selecciona un archivo de imagen válido.');
+    if(file.size>8*1024*1024)throw new Error('La imagen no puede superar 8 MB.');
+    const uploadFile=await optimizeProfileImage(file);
+    const sig=await apiFetch('/uploads/signature?kind=profile');const form=new FormData();form.append('file',uploadFile);form.append('api_key',sig.api_key);form.append('timestamp',String(sig.timestamp));form.append('signature',sig.signature);form.append('folder',sig.folder);let res;try{res=await fetch(`https://api.cloudinary.com/v1_1/${sig.cloud_name}/image/upload`,{method:'POST',body:form});}catch{throw new Error('No se pudo conectar con el servicio de imágenes.');}const data=await res.json().catch(()=>null);if(!res.ok||!data?.secure_url)throw new Error(data?.error?.message||'No se pudo subir la foto.');
+    const previousProfile=getCached('/users/profile');
+    const updated=await apiFetch('/users/foto',{method:'PUT',body:JSON.stringify({foto:data.secure_url})});
+    if(previousProfile)putCached('/users/profile',{...previousProfile,foto:updated.foto||data.secure_url});
+    return updated.foto||data.secure_url;
+}
 import('./admin-bootstrap.js').catch(err=>console.error('admin bootstrap',err));
 import('./premium-radius.js').catch(err=>console.error('premium radius bootstrap',err));
