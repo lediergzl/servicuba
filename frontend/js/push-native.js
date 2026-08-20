@@ -12,8 +12,18 @@ function urlBase64ToUint8Array(base64String) {
 
 let eventSource = null;
 let nativeActionListenerAttached = false;
+const SERVICE_WORKER_READY_TIMEOUT_MS = 8000;
 
+function urlBaseUrl() { return window.location.origin; }
 function apiBaseUrl() { return window.location.origin; }
+
+async function readyWithTimeout(ms = SERVICE_WORKER_READY_TIMEOUT_MS) {
+    if (!('serviceWorker' in navigator)) throw new Error('Service Worker no disponible');
+    return Promise.race([
+        navigator.serviceWorker.ready,
+        new Promise((_, reject) => setTimeout(() => reject(new Error('El Service Worker no respondió a tiempo')), ms))
+    ]);
+}
 
 function attachNativeNotificationActionListener() {
     if (!isNativeApp() || nativeActionListenerAttached) return;
@@ -23,8 +33,6 @@ function attachNativeNotificationActionListener() {
     local.addListener('localNotificationActionPerformed', event => {
         const url = event?.notification?.extra?.url;
         if (!url) return;
-        // El deep-link SPA de app.js interpreta ?task=<uuid> y abre
-        // directamente la oportunidad recibida por el trabajador Premium.
         window.location.href = url;
     });
 }
@@ -60,7 +68,7 @@ export async function initPush() {
     }
     if (!localStorage.getItem('token') || !('serviceWorker' in navigator) || !('PushManager' in window)) return;
     try {
-        const registration = await navigator.serviceWorker.ready;
+        const registration = await readyWithTimeout();
         const subscription = await registration.pushManager.getSubscription();
         if (subscription) await sendWebSubscription(subscription);
     } catch (err) { console.warn('[ServiCuba Push] init:', err); }
@@ -79,7 +87,7 @@ export async function enablePushNotifications() {
     try {
         if (await Notification.requestPermission() !== 'granted') { notify('No activaste los permisos de notificación.', 'info'); return false; }
         const { publicKey } = await apiFetch('/push/vapid-public-key');
-        const registration = await navigator.serviceWorker.ready;
+        const registration = await readyWithTimeout();
         const subscription = await registration.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: urlBase64ToUint8Array(publicKey) });
         await sendWebSubscription(subscription); notify('Notificaciones activadas.', 'success'); return true;
     } catch (err) { notify(`No se pudieron activar las notificaciones: ${err.message}`, 'error'); return false; }
