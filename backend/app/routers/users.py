@@ -15,21 +15,15 @@ router = APIRouter()
 
 @router.get('/profile', response_model=UserResponse)
 def get_profile(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    # Prueba de aislamiento de rendimiento: la restauración de sesión y el
-    # perfil nunca deben depender de una descarga externa de Cloudinary.
-    # La foto se conserva en la base de datos, pero temporalmente no se entrega
-    # en esta respuesta para comprobar si la carga de imagen participa en el
-    # bloqueo observado después del login.
+    # Prueba de aislamiento: la respuesta crítica de perfil no entrega la URL
+    # de Cloudinary. build_user_response devuelve un dict, por lo que se debe
+    # modificar por clave y no mediante atributos.
     response = build_user_response(db, current_user)
-    response.foto = None
+    response['foto'] = None
     return response
 
 @router.put('/foto', response_model=UserResponse)
 def actualizar_foto_perfil(body: FotoPerfilRequest, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
-    # validar_url_foto exige https + host de Cloudinary + el cloud_name de
-    # ESTA app (services/cloudinary.py) — evita que alguien guarde cualquier
-    # URL externa como "foto de perfil" (phishing/imágenes ofensivas fuera
-    # de nuestro control de moderación).
     current_user.foto = validar_url_foto(body.foto)
     try: db.commit()
     except Exception: db.rollback(); raise
