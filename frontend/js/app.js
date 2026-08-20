@@ -149,6 +149,18 @@ async function restoreSession() {
     catch (err) { localStorage.removeItem('token'); setGuestUi(); return false; }
 }
 
+async function registerServiceWorker() {
+    if (!('serviceWorker' in navigator)) return null;
+    try {
+        const registration = await navigator.serviceWorker.register('/service-worker.js', { scope: '/' });
+        console.info('[ServiCuba] Service Worker registrado:', registration.scope);
+        return registration;
+    } catch (err) {
+        console.warn('[ServiCuba] No se pudo registrar el Service Worker:', err);
+        return null;
+    }
+}
+
 async function boot() {
     setGuestUi(); showLanding();
     const headerCss = document.createElement('link'); headerCss.rel = 'stylesheet'; headerCss.href = '/css/header-responsive-fix.css?v=3'; document.head.appendChild(headerCss);
@@ -160,7 +172,8 @@ async function boot() {
     try { initChat(); } catch (err) { console.error('initChat', err); }
     try { initMap(); } catch (err) { console.error('initMap', err); }
     try { initVerification(); } catch (err) { console.error('verification', err); }
-    try { initPush(); } catch (err) { console.error('push', err); }
+    try { await registerServiceWorker(); } catch (err) { console.error('service worker', err); }
+    try { await initPush(); } catch (err) { console.error('push', err); }
     try { initSponsorAdEntry(); } catch (err) { console.error('ads', err); }
     wireGlobalButtons();
     try { await loadCategories(); } catch (err) { console.error('loadCategories', err); }
