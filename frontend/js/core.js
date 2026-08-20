@@ -1,18 +1,65 @@
 // ============================================================
 // Núcleo compartido: fetch autenticado, UI (toasts/modales), geolocalización.
+// Optimizado para conexiones lentas: timeout, deduplicación y caché corta.
 // ============================================================
 import { isNativeApp, nativeGetCurrentPosition } from './native.js';
 export const API_BASE = '/api';
 export function escapeHtml(str){const d=document.createElement('div');d.textContent=str??'';return d.innerHTML;}
 function getAnonymousEntitlements(){return{plan:'gratis',plan_expira:null,es_cliente:false,es_trabajador:false,can_discover:true,can_contact:false,can_apply:false,can_publish_need:false,can_publish_service:false,services_daily_limit:0,max_radius_km:null,can_publish_ads:false,ads_daily_limit:0,priority_notifications:false,anonymous:true};}
-export async function apiFetch(path,options={}){const token=localStorage.getItem('token'),method=(options.method||'GET').toUpperCase();if(!token&&method==='GET'&&path==='/users/entitlements')return getAnonymousEntitlements();const headers={...(options.body?{'Content-Type':'application/json'}:{}),...(token?{Authorization:`Bearer ${token}`}:{ }),...options.headers},url=`${API_BASE}${path}`;let res;try{res=await fetch(url,{...options,headers});}catch(networkError){if(networkError?.name==='AbortError')throw networkError;console.error('[ServiCuba API] Network error',{url,options,networkError});throw new Error('No se pudo conectar con el servidor. Revisa tu conexión.');}if(res.status===401){if(token){localStorage.removeItem('token');notify('Tu sesión expiró. Inicia sesión de nuevo.','error');document.dispatchEvent(new CustomEvent('auth:expired'));}throw new Error('No autorizado');}let data=null;const ct=res.headers.get('content-type')||'';if(ct.includes('application/json'))data=await res.json().catch(()=>null);if(!res.ok){const detail=data?.detail,validation=Array.isArray(detail)?detail.map(i=>({location:i.loc?.join('.')||'unknown',message:i.msg,type:i.type,input:i.input})):null;
-    // silentStatuses: códigos de respuesta que el propio llamador ya
-    // trata como un resultado normal del flujo (p.ej. 403 al preguntar
-    // "¿soy admin?" para un usuario que no lo es) — loguearlos como
-    // console.error en cada carga de la app para el 99% de usuarios que
-    // no son admin es ruido, no una señal de fallo real.
-    if(!(options.silentStatuses||[]).includes(res.status)){console.error('[ServiCuba API] Request failed',{url,status:res.status,method,response:data,validation,requestBody:options.body||null});}
-    if(res.status===422&&validation?.length)throw new Error(`Solicitud inválida en ${validation.map(v=>`${v.location}: ${v.message}`).join('; ')}`);throw new Error(typeof detail==='string'?detail:`Error ${res.status}`);}return data;}
+
+// GET idénticos no deben multiplicarse cuando varios componentes arrancan a la vez.
+const inflightGetRequests=new Map();
+const responseCache=new Map();
+const CACHE_TTL={
+    '/applications/mine':15000,
+    '/categories':300000,
+    '/users/me':30000,
+    '/users/entitlements':30000
+};
+function cacheTtl(path){const base=path.split('?')[0];return CACHE_TTL[base]||0;}
+function cacheKey(url,token){return `${token||'anon'}:${url}`;}
+function createTimeoutSignal(options,timeoutMs){
+    const controller=new AbortController();
+    const timer=setTimeout(()=>controller.abort(new DOMException('Tiempo de espera agotado','TimeoutError')),timeoutMs);
+    const external=options.signal;
+    const abortExternal=()=>controller.abort(external?.reason||new DOMException('Solicitud cancelada','AbortError'));
+    if(external){if(external.aborted)abortExternal();else external.addEventListener('abort',abortExternal,{once:true});}
+    return{signal:controller.signal,cleanup(){clearTimeout(timer);external?.removeEventListener('abort',abortExternal);}};
+}
+async function requestApi(url,headers,options,method){
+    const timeoutMs=Number(options.timeoutMs)||(method==='GET'?15000:30000);
+    const {signal,cleanup}=createTimeoutSignal(options,timeoutMs);
+    try{return await fetch(url,{...options,headers,signal});}
+    finally{cleanup();}
+}
+export async function apiFetch(path,options={}){
+    const token=localStorage.getItem('token'),method=(options.method||'GET').toUpperCase();
+    if(!token&&method==='GET'&&path==='/users/entitlements')return getAnonymousEntitlements();
+    const headers={...(options.body?{'Content-Type':'application/json'}:{}),...(token?{Authorization:`Bearer ${token}`}:{ }),...options.headers},url=`${API_BASE}${path}`;
+    const key=cacheKey(url,token),ttl=method==='GET'&&!options.signal&&!options.cacheBypass?cacheTtl(path):0;
+    if(ttl){const cached=responseCache.get(key);if(cached&&cached.expires>Date.now())return cached.data;}
+    const perform=async()=>{
+        let res;
+        try{res=await requestApi(url,headers,options,method);}
+        catch(networkError){
+            if(networkError?.name==='AbortError'||networkError?.name==='TimeoutError')throw networkError;
+            console.error('[ServiCuba API] Network error',{url,method,networkError});
+            throw new Error('No se pudo conectar con el servidor. Revisa tu conexión.');
+        }
+        if(res.status===401){if(token){localStorage.removeItem('token');notify('Tu sesión expiró. Inicia sesión de nuevo.','error');document.dispatchEvent(new CustomEvent('auth:expired'));}throw new Error('No autorizado');}
+        let data=null;const ct=res.headers.get('content-type')||'';if(ct.includes('application/json'))data=await res.json().catch(()=>null);
+        if(!res.ok){const detail=data?.detail,validation=Array.isArray(detail)?detail.map(i=>({location:i.loc?.join('.')||'unknown',message:i.msg,type:i.type,input:i.input})):null;
+            if(!(options.silentStatuses||[]).includes(res.status)){console.error('[ServiCuba API] Request failed',{url,status:res.status,method,response:data,validation});}
+            if(res.status===422&&validation?.length)throw new Error(`Solicitud inválida en ${validation.map(v=>`${v.location}: ${v.message}`).join('; ')}`);
+            throw new Error(typeof detail==='string'?detail:`Error ${res.status}`);
+        }
+        if(ttl)responseCache.set(key,{data,expires:Date.now()+ttl});
+        if(method!=='GET')responseCache.clear();
+        return data;
+    };
+    if(method==='GET'&&!options.signal){const running=inflightGetRequests.get(key);if(running)return running;const promise=perform().finally(()=>inflightGetRequests.delete(key));inflightGetRequests.set(key,promise);return promise;}
+    return perform();
+}
 export function ensureUiRoot(){let r=document.getElementById('ui-overlay-root');if(r)return r;r=document.createElement('div');r.id='ui-overlay-root';document.body.appendChild(r);const c=document.createElement('div');c.id='toast-container';c.className='toast-container';r.appendChild(c);return r;}
 export function notify(message,type='info'){ensureUiRoot();const c=document.getElementById('toast-container'),t=document.createElement('div');t.className=`toast toast--${type}`;t.textContent=message;t.setAttribute('role','status');c.appendChild(t);setTimeout(()=>{t.style.opacity='0';setTimeout(()=>t.remove(),300);},3500);}
 export function showFormModal({title,fields,confirmLabel='Guardar',cancelLabel='Cancelar'}){ensureUiRoot();return new Promise(resolve=>{const o=document.createElement('div'),m=document.createElement('form');o.className='modal-overlay';m.className='modal-card';m.noValidate=true;const h=document.createElement('h2');h.className='modal-title';h.textContent=title;m.appendChild(h);const inputs={};fields.forEach(f=>{const w=document.createElement('div'),l=document.createElement('label');w.className='field-wrapper';l.className='field-label';l.textContent=f.label;w.appendChild(l);let i;if(f.type==='textarea'){i=document.createElement('textarea');i.rows=3;}else if(f.type==='select'){i=document.createElement('select');(f.options||[]).forEach(x=>{const q=document.createElement('option');q.value=x.value;q.textContent=x.label;i.appendChild(q);});}else{i=document.createElement('input');i.type=f.type||'text';if(f.min!==undefined)i.min=f.min;if(f.step!==undefined)i.step=f.step;}i.className='field-input';if(f.type!=='select')i.placeholder=f.placeholder||'';if(f.required)i.required=true;if(f.value!==undefined)i.value=f.value;const e=document.createElement('p');e.className='field-error hidden';w.append(i,e);inputs[f.name]={input:i,errorMsg:e,field:f};m.appendChild(w);});const a=document.createElement('div'),x=document.createElement('button'),s=document.createElement('button');a.className='modal-actions';x.type='button';x.className='btn btn-ghost';x.textContent=cancelLabel;s.type='submit';s.className='btn btn-primary';s.textContent=confirmLabel;a.append(x,s);m.appendChild(a);o.appendChild(m);document.body.appendChild(o);Object.values(inputs)[0]?.input.focus();const close=v=>{o.remove();document.removeEventListener('keydown',key);resolve(v);},key=e=>{if(e.key==='Escape')close(null);};document.addEventListener('keydown',key);x.onclick=()=>close(null);o.onclick=e=>{if(e.target===o)close(null);};m.onsubmit=e=>{e.preventDefault();let ok=true;const v={};for(const[n,{input,errorMsg,field}]of Object.entries(inputs)){errorMsg.classList.add('hidden');if(field.type==='select'){v[n]=input.value;continue;}const raw=input.value.trim();if(field.required&&!raw){errorMsg.textContent='Este campo es obligatorio.';errorMsg.classList.remove('hidden');ok=false;continue;}if(field.type==='number'&&raw){const num=parseFloat(raw);if(isNaN(num)||(field.min!==undefined&&num<field.min)){errorMsg.textContent='Debe ser un número válido.';errorMsg.classList.remove('hidden');ok=false;continue;}v[n]=num;}else v[n]=raw;}if(ok)close(v);};});}
@@ -22,29 +69,6 @@ async function recoverGeolocation(error){let e=error;while(true){const saved=rea
 export async function getGeolocation(){const saved=readSavedLocation();if(saved)return toPosition(saved);if(isNativeApp())try{const p=await nativeGetCurrentPosition();if(p?.coords){const v={lat:Number(p.coords.latitude),lng:Number(p.coords.longitude),accuracy:p.coords.accuracy||null,source:'native-gps'};saveLocation(v);return toPosition(v);}}catch(e){console.warn('[ServiCuba] GPS nativo falló; usando navegador:',e);}try{return await requestBrowserGeolocation();}catch(e){return recoverGeolocation(e);}}
 export async function refreshGeolocation(){try{if(isNativeApp()){const p=await nativeGetCurrentPosition();if(p?.coords){const v={lat:Number(p.coords.latitude),lng:Number(p.coords.longitude),accuracy:p.coords.accuracy||null,source:'native-gps'};saveLocation(v);return toPosition(v);}}return await requestBrowserGeolocation();}catch(e){return recoverGeolocation(e);}}
 export function getSavedLocation(){const v=readSavedLocation();return v?toPosition(v):null;}export function geolocationErrorMessage(e){if(!e)return'No se pudo obtener tu ubicación.';switch(e.code){case 1:return'Activa el permiso de ubicación para continuar.';case 2:return'No se pudo determinar tu ubicación. Verifica el GPS.';case 3:return'La solicitud de ubicación tardó demasiado. Intenta de nuevo.';default:return e.message||'No se pudo obtener tu ubicación.';}}
-// Sube una foto directo del navegador a Cloudinary usando parámetros
-// firmados por el backend (GET /uploads/signature) — el backend nunca ve
-// los bytes de la imagen, sólo firma la subida (ver services/cloudinary.py).
-// Tras subirla, PUT /users/foto la guarda en el perfil (revalidada de
-// nuevo server-side con validar_url_foto).
-export async function uploadProfilePhoto(file){
-    if(!file||!file.type?.startsWith('image/'))throw new Error('Selecciona un archivo de imagen válido.');
-    if(file.size>8*1024*1024)throw new Error('La imagen no puede superar 8 MB.');
-    const sig=await apiFetch('/uploads/signature?kind=profile');
-    const form=new FormData();
-    form.append('file',file);
-    form.append('api_key',sig.api_key);
-    form.append('timestamp',String(sig.timestamp));
-    form.append('signature',sig.signature);
-    form.append('folder',sig.folder);
-    let res;
-    try{res=await fetch(`https://api.cloudinary.com/v1_1/${sig.cloud_name}/image/upload`,{method:'POST',body:form});}
-    catch{throw new Error('No se pudo conectar con el servicio de imágenes.');}
-    const data=await res.json().catch(()=>null);
-    if(!res.ok||!data?.secure_url)throw new Error(data?.error?.message||'No se pudo subir la foto.');
-    const updated=await apiFetch('/users/foto',{method:'PUT',body:JSON.stringify({foto:data.secure_url})});
-    return updated.foto;
-}
-// Carga perezosa: conecta los módulos auxiliares sin acoplar app.js ni crear un segundo boot.
+export async function uploadProfilePhoto(file){if(!file||!file.type?.startsWith('image/'))throw new Error('Selecciona un archivo de imagen válido.');if(file.size>8*1024*1024)throw new Error('La imagen no puede superar 8 MB.');const sig=await apiFetch('/uploads/signature?kind=profile');const form=new FormData();form.append('file',file);form.append('api_key',sig.api_key);form.append('timestamp',String(sig.timestamp));form.append('signature',sig.signature);form.append('folder',sig.folder);let res;try{res=await fetch(`https://api.cloudinary.com/v1_1/${sig.cloud_name}/image/upload`,{method:'POST',body:form});}catch{throw new Error('No se pudo conectar con el servicio de imágenes.');}const data=await res.json().catch(()=>null);if(!res.ok||!data?.secure_url)throw new Error(data?.error?.message||'No se pudo subir la foto.');const updated=await apiFetch('/users/foto',{method:'PUT',body:JSON.stringify({foto:data.secure_url})});return updated.foto;}
 import('./admin-bootstrap.js').catch(err=>console.error('admin bootstrap',err));
 import('./premium-radius.js').catch(err=>console.error('premium radius bootstrap',err));
