@@ -1,6 +1,7 @@
-// v17: mejoras de diseño (task-card, hero-search, sub-tabs, campos de modal).
+// v18: pasada de diseño "workshop premium" (textura, botones táctiles,
+// tipografía de marca en tarjetas, sub-tabs segmentadas).
 // Nunca devolvemos undefined desde un fetch handler.
-const CACHE_VERSION = 'v17';
+const CACHE_VERSION = 'v18';
 const CACHE_NAME = `servicuba-${CACHE_VERSION}`;
 
 const CORE_URLS = [

@@ -297,3 +297,126 @@ select.field-input:hover,select.field-input:focus-visible{border-color:var(--cop
   border: 1px dashed var(--line);
   border-radius: var(--radius-md);
 }
+
+/* ============================================================
+   Pasada "workshop premium" — el layout ya funcionaba, pero se veía
+   como un panel de admin genérico: sin textura, botones planos,
+   títulos con la misma tipografía que el cuerpo, banner de aviso
+   como un toast ajeno a la marca. Esto lo acerca al sistema real
+   (ink verde + amarillo seguridad + Big Shoulders Display).
+   ============================================================ */
+
+/* Textura sutil tipo "papel cuadriculado de taller" en vez de gris liso */
+.app-main {
+  background-image: radial-gradient(circle, rgba(18, 40, 38, .06) 1px, transparent 1px);
+  background-size: 20px 20px;
+}
+
+/* Header: borde de acento como remate, igual que el bottom-nav */
+.app-header {
+  background: linear-gradient(165deg, var(--ink), var(--ink-soft));
+  border-bottom: 3px solid var(--accent);
+  box-shadow: 0 4px 14px rgba(18, 40, 38, .22);
+}
+.app-header__wordmark { letter-spacing: .01em; }
+
+/* Banner de verificación: pasa de "toast amarillo genérico" a una
+   franja de marca — continúa visualmente el header oscuro en vez de
+   interrumpirlo con un bloque pastel ajeno. */
+.verification-banner {
+  background: var(--ink-soft);
+  color: var(--accent-soft);
+  border-bottom: 1px solid rgba(242, 183, 5, .28);
+  font-weight: 600;
+}
+.verification-banner::before {
+  content: '⚠';
+  color: var(--accent);
+  font-weight: 800;
+}
+.verification-banner span { display: flex; align-items: center; gap: 8px; }
+
+/* Selector Cliente/Trabajador: más peso táctil en el estado activo */
+.mode-switch { padding: 12px 16px; gap: 8px; }
+.mode-switch__btn {
+  padding: 11px 10px;
+  font-size: 13.5px;
+  transition: box-shadow .15s var(--ease), transform .12s var(--ease);
+}
+.mode-switch__btn.is-active {
+  box-shadow: 0 4px 12px rgba(18, 40, 38, .28);
+}
+
+/* Botones: sombra inferior sólida (efecto "tecla de taller") en vez de
+   rectángulos planos sin ninguna sensación de profundidad o de "presión". */
+.btn { transition: transform .1s var(--ease), box-shadow .1s var(--ease), filter .1s var(--ease); }
+.btn-accent {
+  font-weight: 800;
+  box-shadow: 0 3px 0 var(--copper), 0 3px 8px rgba(196, 106, 44, .28);
+}
+.btn-accent:hover { filter: brightness(1.04); }
+.btn-accent:active { transform: translateY(2px); box-shadow: 0 1px 0 var(--copper); }
+.btn-primary {
+  box-shadow: 0 3px 0 #06110F, 0 3px 8px rgba(18, 40, 38, .3);
+}
+.btn-primary:active { transform: translateY(2px); box-shadow: 0 1px 0 #06110F; }
+.btn-secondary:active, .btn-ghost:active { transform: translateY(1px); }
+/* Los botones compactos dentro de task-card__actions no llevan este
+   relieve — ahí ya se buscó que fueran discretos, no protagonistas. */
+.task-card__actions .btn:not(:first-child) { box-shadow: none; }
+.task-card__actions .btn:not(:first-child):active { transform: none; }
+
+/* Títulos de sección: remate de acento, igual que el resto de la marca */
+.view-title {
+  position: relative;
+  padding-bottom: 11px;
+}
+.view-title::after {
+  content: '';
+  position: absolute;
+  left: 1px;
+  bottom: 0;
+  width: 42px;
+  height: 3px;
+  background: var(--accent);
+  border-radius: 2px;
+}
+.view-header-row .view-title { padding-bottom: 0; }
+.view-header-row .view-title::after { display: none; }
+
+/* Título de cada tarjeta con la tipografía industrial de la marca en
+   vez del mismo cuerpo de texto que el resto del contenido — así una
+   tarjeta se lee como una "etiqueta de herramienta", no como una fila
+   de tabla. */
+.task-card__title {
+  font-family: var(--font-display);
+  font-weight: 800;
+  letter-spacing: .008em;
+  font-size: 19px;
+}
+
+/* Sub-tabs: de subrayado fino a control segmentado sólido, mismo
+   lenguaje visual que el selector Cliente/Trabajador. */
+.sub-tabs {
+  background: var(--paper-raised);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  padding: 4px;
+  gap: 4px;
+}
+.sub-tab {
+  border-radius: var(--radius-sm);
+  border-bottom: 0;
+  padding: 9px 8px;
+}
+.sub-tab.is-active {
+  background: var(--ink);
+  color: var(--accent);
+  box-shadow: 0 2px 6px rgba(18, 40, 38, .22);
+}
+
+/* Botón "+ Nueva tarea" / "+ Publicar servicio": la acción principal
+   de cada dashboard, se lo trata como tal (peso completo, no btn-sm). */
+.view-header-row .btn-accent.btn-sm {
+  box-shadow: 0 2px 0 var(--copper), 0 2px 6px rgba(196, 106, 44, .25);
+}
