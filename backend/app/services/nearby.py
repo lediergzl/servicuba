@@ -58,6 +58,7 @@ def find_nearby(
         .filter(
             Task.estado == TaskStatus.ACTIVA,
             Task.tipo == tipo,
+            User.es_admin.is_(False),
             ST_DWithin(geo_task, geo_point, radius_m),
         )
     )

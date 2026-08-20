@@ -41,7 +41,11 @@ def directory_municipios(db:Session=Depends(get_db)):
 @router.get("/directory")
 def discover_directory(municipio:Optional[str]=Query(None,max_length=100),tipo:str=Query("oferta",pattern="^(oferta|necesidad)$"),category_id:Optional[int]=None,db:Session=Depends(get_db)):
     if not municipio or len(municipio.strip())<2:return []
-    q=db.query(User,Category.nombre.label("categoria_nombre"),Category.icono.label("categoria_icono")).outerjoin(Category,Category.id==User.categoria_id).filter(User.es_trabajador.is_(True),User.suspendido.is_(False),User.municipio.isnot(None),func.lower(func.trim(User.municipio))==func.lower(municipio.strip()))
+    # es_admin excluido a propósito: la cuenta de administrador (creada por
+    # ADMIN_PHONE/ADMIN_PASSWORD en main.py) puede tener perfil de trabajador
+    # activo por motivos de prueba, pero nunca debe aparecer como resultado
+    # real en un directorio público — rompe la confianza del producto.
+    q=db.query(User,Category.nombre.label("categoria_nombre"),Category.icono.label("categoria_icono")).outerjoin(Category,Category.id==User.categoria_id).filter(User.es_trabajador.is_(True),User.suspendido.is_(False),User.es_admin.is_(False),User.municipio.isnot(None),func.lower(func.trim(User.municipio))==func.lower(municipio.strip()))
     if category_id:q=q.filter(User.categoria_id==category_id)
     rows=q.order_by(User.verificado.desc(),User.rating.desc(),User.nombre.asc()).limit(100).all()
     data=[]

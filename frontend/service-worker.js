@@ -2,8 +2,10 @@
 // frontend/css. El app shell usa network-first, pero cambiar la versión
 // fuerza además la instalación de un nuevo service worker y elimina caches
 // anteriores, evitando que una PWA instalada conserve una versión vieja.
-// v12: fixes de buscador autenticado, geolocalización y mapa.
-const CACHE_VERSION = 'v12';
+// v13: directorio público — avatar con inicial, oculta rating 0.0 falso
+// ("Nuevo en ServiCuba" en su lugar), excluye cuenta admin de listados
+// públicos (backend).
+const CACHE_VERSION = 'v13';
 const CACHE_NAME = `servicuba-${CACHE_VERSION}`;
 
 const urlsToCache = [
