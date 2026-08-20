@@ -5,9 +5,10 @@ from typing import Optional
 from ..database import get_db
 from ..models.user import User, UserPlan
 from ..models.category import Category
-from ..schemas.user import UserResponse, ActivarTrabajadorRequest, ModoActivoRequest
+from ..schemas.user import UserResponse, ActivarTrabajadorRequest, ModoActivoRequest, FotoPerfilRequest
 from ..services.auth import get_current_user, get_current_admin
 from ..services.user_profile import build_user_response
+from ..services.cloudinary import validar_url_foto
 from ..services.plans import effective_plan, services_daily_limit, is_premium_active, PLAN_GRATIS_RADIO_MAX_KM, PLAN_PREMIUM_RADIO_MAX_KM, PLAN_PREMIUM_ANUNCIOS_DIA
 
 router = APIRouter()
@@ -15,6 +16,17 @@ router = APIRouter()
 @router.get('/profile', response_model=UserResponse)
 def get_profile(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     return build_user_response(db, current_user)
+
+@router.put('/foto', response_model=UserResponse)
+def actualizar_foto_perfil(body: FotoPerfilRequest, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    # validar_url_foto exige https + host de Cloudinary + el cloud_name de
+    # ESTA app (services/cloudinary.py) — evita que alguien guarde cualquier
+    # URL externa como "foto de perfil" (phishing/imágenes ofensivas fuera
+    # de nuestro control de moderación).
+    current_user.foto = validar_url_foto(body.foto)
+    try: db.commit()
+    except Exception: db.rollback(); raise
+    db.refresh(current_user); return build_user_response(db, current_user)
 
 @router.get('/public/{user_id}')
 def get_public_worker(user_id: str, db: Session = Depends(get_db)):

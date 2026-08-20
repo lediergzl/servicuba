@@ -22,5 +22,28 @@ async function recoverGeolocation(error){let e=error;while(true){const saved=rea
 export async function getGeolocation(){const saved=readSavedLocation();if(saved)return toPosition(saved);if(isNativeApp())try{const p=await nativeGetCurrentPosition();if(p?.coords){const v={lat:Number(p.coords.latitude),lng:Number(p.coords.longitude),accuracy:p.coords.accuracy||null,source:'native-gps'};saveLocation(v);return toPosition(v);}}catch(e){console.warn('[ServiCuba] GPS nativo falló; usando navegador:',e);}try{return await requestBrowserGeolocation();}catch(e){return recoverGeolocation(e);}}
 export async function refreshGeolocation(){try{if(isNativeApp()){const p=await nativeGetCurrentPosition();if(p?.coords){const v={lat:Number(p.coords.latitude),lng:Number(p.coords.longitude),accuracy:p.coords.accuracy||null,source:'native-gps'};saveLocation(v);return toPosition(v);}}return await requestBrowserGeolocation();}catch(e){return recoverGeolocation(e);}}
 export function getSavedLocation(){const v=readSavedLocation();return v?toPosition(v):null;}export function geolocationErrorMessage(e){if(!e)return'No se pudo obtener tu ubicación.';switch(e.code){case 1:return'Activa el permiso de ubicación para continuar.';case 2:return'No se pudo determinar tu ubicación. Verifica el GPS.';case 3:return'La solicitud de ubicación tardó demasiado. Intenta de nuevo.';default:return e.message||'No se pudo obtener tu ubicación.';}}
+// Sube una foto directo del navegador a Cloudinary usando parámetros
+// firmados por el backend (GET /uploads/signature) — el backend nunca ve
+// los bytes de la imagen, sólo firma la subida (ver services/cloudinary.py).
+// Tras subirla, PUT /users/foto la guarda en el perfil (revalidada de
+// nuevo server-side con validar_url_foto).
+export async function uploadProfilePhoto(file){
+    if(!file||!file.type?.startsWith('image/'))throw new Error('Selecciona un archivo de imagen válido.');
+    if(file.size>8*1024*1024)throw new Error('La imagen no puede superar 8 MB.');
+    const sig=await apiFetch('/uploads/signature?kind=profile');
+    const form=new FormData();
+    form.append('file',file);
+    form.append('api_key',sig.api_key);
+    form.append('timestamp',String(sig.timestamp));
+    form.append('signature',sig.signature);
+    form.append('folder',sig.folder);
+    let res;
+    try{res=await fetch(`https://api.cloudinary.com/v1_1/${sig.cloud_name}/image/upload`,{method:'POST',body:form});}
+    catch{throw new Error('No se pudo conectar con el servicio de imágenes.');}
+    const data=await res.json().catch(()=>null);
+    if(!res.ok||!data?.secure_url)throw new Error(data?.error?.message||'No se pudo subir la foto.');
+    const updated=await apiFetch('/users/foto',{method:'PUT',body:JSON.stringify({foto:data.secure_url})});
+    return updated.foto;
+}
 // Carga perezosa: conecta el panel admin sin acoplar app.js ni crear un segundo boot.
 import('./admin-bootstrap.js').catch(err=>console.error('admin bootstrap',err));

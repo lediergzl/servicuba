@@ -85,6 +85,7 @@ class UserResponse(BaseModel):
     categoria_id: Optional[int] = None
     categoria_nombre: Optional[str] = None
     categoria_icono: Optional[str] = None
+    foto: Optional[str] = None
     descripcion_trabajador: Optional[str] = None
     precio_hora: Optional[float] = None
     municipio: Optional[str] = None
@@ -111,3 +112,7 @@ class ModoActivoRequest(BaseModel):
         if value not in {"cliente", "trabajador"}:
             raise ValueError("Modo activo inválido")
         return value
+
+
+class FotoPerfilRequest(BaseModel):
+    foto: str = Field(min_length=1, max_length=500)

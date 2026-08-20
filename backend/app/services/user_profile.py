@@ -32,6 +32,7 @@ def build_user_response(db: Session, user: User) -> dict:
         "categoria_id": user.categoria_id,
         "categoria_nombre": categoria_nombre,
         "categoria_icono": categoria_icono,
+        "foto": user.foto,
         "descripcion_trabajador": user.descripcion_trabajador,
         "precio_hora": user.precio_hora,
         "municipio": user.municipio,

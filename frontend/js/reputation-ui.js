@@ -30,6 +30,7 @@ function ensureStyles() {
         .sc-card-reputation__stars { color:var(--copper); letter-spacing:.5px; font-size:12px; }
         .sc-card-reputation__score { color:var(--ink); font-weight:800; }
         .sc-card-reputation__verified,.experience-card__verified { color:var(--success); font-weight:700; }
+        .sc-card-reputation__new { color:var(--copper); font-weight:700; }
         .sc-card-reputation--empty { opacity:.8; }
         .experience-list { margin-top:14px; display:grid; gap:10px; }
         .experience-card { border-top:1px solid var(--line); padding-top:12px; }
@@ -114,7 +115,7 @@ function renderCardReputation(card, summary) {
     card.querySelector('.sc-card-reputation')?.remove();
     const total=Number(summary.reviews||0), rating=Number(summary.rating||0);
     const row=document.createElement('div'); row.className='sc-card-reputation';
-    row.innerHTML=total ? `<span class="sc-card-reputation__stars">${stars(rating)}</span><span class="sc-card-reputation__score">${rating.toFixed(1)}</span><span>· ${total} ${total===1?'reseña':'reseñas'}</span>${summary.verified?'<span class="sc-card-reputation__verified">✓ Verificada</span>':''}` : '<span>Sin reseñas verificadas todavía</span>';
+    row.innerHTML=total ? `<span class="sc-card-reputation__stars">${stars(rating)}</span><span class="sc-card-reputation__score">${rating.toFixed(1)}</span><span>· ${total} ${total===1?'reseña':'reseñas'}</span>${summary.verified?'<span class="sc-card-reputation__verified">✓ Verificada</span>':''}` : '<span class="sc-card-reputation__new">✦ Nuevo en ServiCuba</span>';
     card.querySelector('.task-card__meta')?.insertAdjacentElement('afterend',row) || card.appendChild(row);
 }
 

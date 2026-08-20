@@ -1,4 +1,4 @@
-import { apiFetch, notify, escapeHtml, getGeolocation } from './core.js';
+import { apiFetch, notify, escapeHtml, getGeolocation, uploadProfilePhoto } from './core.js';
 import { initAuth, showLanding, showRegister, showLogin, logout } from './auth.js';
 import { initTasks, loadCategories, showDashboardCliente, showDashboardTrabajador, switchView } from './tasks.js';
 import { initMap } from './map.js';
@@ -150,7 +150,23 @@ async function loadProfileView() {
     const container = document.getElementById('perfilContenido'); if (!container) return; container.innerHTML = '<p class="view-subtitle">Cargando perfil…</p>';
     try {
         const profile = await apiFetch('/users/profile'); const role = profile.es_trabajador ? 'Trabajador' : 'Cliente'; const category = profile.categoria_nombre || profile.categoria || 'Sin oficio configurado'; const rating = profile.rating != null ? Number(profile.rating).toFixed(1) : '0.0';
-        container.innerHTML = `<div class="task-card"><div class="task-card__row"><h3 class="task-card__title">${escapeHtml(profile.nombre || 'Usuario')}</h3><span class="chip">${escapeHtml(role)}</span></div><p class="task-card__meta">${escapeHtml(profile.telefono || '')}</p><p class="task-card__meta">${escapeHtml(category)} · ⭐ ${escapeHtml(rating)}</p>${profile.municipio ? `<p class="task-card__meta">${escapeHtml(profile.municipio)}${profile.zona ? ` · ${escapeHtml(profile.zona)}` : ''}</p>` : ''}${profile.descripcion_trabajador ? `<p>${escapeHtml(profile.descripcion_trabajador)}</p>` : ''}</div>`;
+        const avatarHtml = profile.foto
+            ? `<img src="${escapeHtml(profile.foto)}" alt="Foto de perfil" class="profile-photo__img">`
+            : `<span class="profile-photo__placeholder" aria-hidden="true">${escapeHtml((profile.nombre || '?').trim().charAt(0).toUpperCase() || '?')}</span>`;
+        container.innerHTML = `<div class="task-card"><div class="profile-photo"><div class="profile-photo__frame">${avatarHtml}</div><label class="btn btn-secondary btn-sm profile-photo__upload">📷 ${profile.foto ? 'Cambiar foto' : 'Agregar foto de perfil'}<input type="file" id="profilePhotoInput" accept="image/*" class="sr-only"></label></div><div class="task-card__row"><h3 class="task-card__title">${escapeHtml(profile.nombre || 'Usuario')}</h3><span class="chip">${escapeHtml(role)}</span></div><p class="task-card__meta">${escapeHtml(profile.telefono || '')}</p><p class="task-card__meta">${escapeHtml(category)} · ⭐ ${escapeHtml(rating)}</p>${profile.municipio ? `<p class="task-card__meta">${escapeHtml(profile.municipio)}${profile.zona ? ` · ${escapeHtml(profile.zona)}` : ''}</p>` : ''}${profile.descripcion_trabajador ? `<p>${escapeHtml(profile.descripcion_trabajador)}</p>` : ''}</div>`;
+        document.getElementById('profilePhotoInput')?.addEventListener('change', async (e) => {
+            const file = e.target.files?.[0]; if (!file) return;
+            const label = e.target.closest('.profile-photo__upload'); const original = label.textContent;
+            label.textContent = 'Subiendo…'; label.setAttribute('aria-busy', 'true');
+            try {
+                await uploadProfilePhoto(file);
+                notify('Foto de perfil actualizada.', 'success');
+                await loadProfileView();
+            } catch (err) {
+                notify(`No se pudo actualizar la foto: ${err.message}`, 'error');
+                label.textContent = original; label.removeAttribute('aria-busy');
+            }
+        });
         await renderWorkerActivationForm(profile);
     } catch (err) { container.innerHTML = '<p class="empty-state">No pudimos cargar tu perfil. Inténtalo nuevamente.</p>'; notify(`No se pudo cargar el perfil: ${err.message}`, 'error'); }
 }
