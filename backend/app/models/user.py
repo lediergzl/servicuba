@@ -12,8 +12,6 @@ class UserRole(enum.Enum):
     TRABAJADOR = "trabajador"
 
 class UserPlan(enum.Enum):
-    # GRATIS = cliente/consumidor. BASE = profesional que publica servicios.
-    # PREMIUM = profesional con promoción/visibilidad adicional.
     GRATIS = "gratis"
     BASE = "base"
     PREMIUM = "premium"
@@ -24,6 +22,7 @@ class User(Base):
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     nombre = Column(String(100), nullable=False)
     telefono = Column(String(20), unique=True, nullable=False)
+    email = Column(String(254), unique=True, nullable=True, index=True)
     password_hash = Column(String(255), nullable=False)
     rol = Column(Enum(UserRole), nullable=True)
 
@@ -45,16 +44,11 @@ class User(Base):
     foto = Column(String(255), nullable=True)
     verificado = Column(Boolean, default=False)
 
-    # Verification codes are stored as bcrypt hashes, not plaintext OTPs.
     codigo_verificacion = Column(String(255), nullable=True)
     codigo_verificacion_expira = Column(DateTime, nullable=True)
-
-    # Password recovery stores a bcrypt hash, not the six-digit code.
     codigo_reset_password = Column(String(255), nullable=True)
     codigo_reset_password_expira = Column(DateTime, nullable=True)
 
-    # Account-level brute-force protection. These values survive process restarts
-    # and complement the IP-based middleware limiter.
     login_failed_attempts = Column(Integer, default=0, nullable=False)
     login_locked_until = Column(DateTime, nullable=True)
     login_last_failed_at = Column(DateTime, nullable=True)
