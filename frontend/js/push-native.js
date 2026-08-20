@@ -67,11 +67,19 @@ export async function initPush() {
         return;
     }
     if (!localStorage.getItem('token') || !('serviceWorker' in navigator) || !('PushManager' in window)) return;
-    try {
-        const registration = await readyWithTimeout();
-        const subscription = await registration.pushManager.getSubscription();
-        if (subscription) await sendWebSubscription(subscription);
-    } catch (err) { console.warn('[ServiCuba Push] init:', err); }
+
+    // IMPORTANTE: la inicialización de Push nunca debe bloquear el arranque de la SPA.
+    // En conexiones lentas el Service Worker puede tardar varios segundos en quedar listo.
+    // El caller (boot/app.js) debe poder registrar botones y navegación inmediatamente.
+    void (async () => {
+        try {
+            const registration = await readyWithTimeout();
+            const subscription = await registration.pushManager.getSubscription();
+            if (subscription) await sendWebSubscription(subscription);
+        } catch (err) {
+            console.warn('[ServiCuba Push] init en segundo plano:', err);
+        }
+    })();
 }
 
 export async function enablePushNotifications() {
