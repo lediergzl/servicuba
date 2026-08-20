@@ -1,0 +1,71 @@
+// Integración del panel administrativo con la SPA.
+import { apiFetch, notify } from './core.js';
+import { initAdminPanel, loadPendingPayments, checkAndShowAdminEntry } from './admin.js';
+
+let initialized = false;
+
+async function refreshAdminAccess() {
+    const btn = document.getElementById('adminPanelBtn');
+    if (!btn) return;
+    if (!localStorage.getItem('token')) {
+        btn.classList.add('hidden');
+        return;
+    }
+    try {
+        // El backend es la fuente de verdad; si /status no está disponible,
+        // mantenemos compatibilidad con el chequeo del perfil existente.
+        let allowed = false;
+        try {
+            const status = await apiFetch('/admin/status');
+            allowed = status?.is_admin === true || status?.es_admin === true || status?.authorized === true;
+        } catch (err) {
+            if (String(err?.message || '').includes('No autorizado')) allowed = false;
+            else {
+                await checkAndShowAdminEntry();
+                return;
+            }
+        }
+        btn.classList.toggle('hidden', !allowed);
+    } catch {
+        btn.classList.add('hidden');
+    }
+}
+
+async function openAdmin() {
+    try {
+        const status = await apiFetch('/admin/status');
+        const allowed = status?.is_admin === true || status?.es_admin === true || status?.authorized === true;
+        if (!allowed) throw new Error('No autorizado');
+    } catch (err) {
+        notify('No tienes permisos de administración.', 'error');
+        await refreshAdminAccess();
+        return;
+    }
+    document.querySelectorAll('.view').forEach(v => v.classList.add('hidden'));
+    document.getElementById('adminView')?.classList.remove('hidden');
+    await loadPendingPayments();
+}
+
+function closeAdmin() {
+    document.getElementById('adminView')?.classList.add('hidden');
+    document.getElementById('perfilView')?.classList.remove('hidden');
+}
+
+function init() {
+    if (initialized) return;
+    initialized = true;
+    initAdminPanel();
+    document.getElementById('adminPanelBtn')?.addEventListener('click', openAdmin);
+    document.getElementById('adminBackBtn')?.addEventListener('click', closeAdmin);
+    refreshAdminAccess();
+    document.addEventListener('auth:changed', refreshAdminAccess);
+    document.addEventListener('auth:expired', () => document.getElementById('adminPanelBtn')?.classList.add('hidden'));
+    window.addEventListener('storage', e => { if (e.key === 'token') refreshAdminAccess(); });
+    // Al volver al perfil, revalidamos por si la sesión cambió.
+    document.addEventListener('click', e => {
+        if (e.target.closest('[data-view="perfil"], #logoutBtn')) setTimeout(refreshAdminAccess, 0);
+    });
+}
+
+if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init, { once: true });
+else init();
