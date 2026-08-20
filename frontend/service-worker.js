@@ -1,6 +1,6 @@
-// v16: estrategia de carga tolerante a conexiones lentas y fallos de red.
+// v17: mejoras de diseño (task-card, hero-search, sub-tabs, campos de modal).
 // Nunca devolvemos undefined desde un fetch handler.
-const CACHE_VERSION = 'v16';
+const CACHE_VERSION = 'v17';
 const CACHE_NAME = `servicuba-${CACHE_VERSION}`;
 
 const CORE_URLS = [
