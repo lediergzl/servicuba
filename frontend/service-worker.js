@@ -1,7 +1,7 @@
-// v19: fix — los anuncios aprobados nunca se mostraban a los usuarios
-// porque loadAdBanner() nunca se invocaba desde ningún lado.
+// v20: fix — un click accidental fuera de cualquier formulario modal
+// (crear anuncio, tarea, reseña, etc.) descartaba todo sin avisar.
 // Nunca devolvemos undefined desde un fetch handler.
-const CACHE_VERSION = 'v19';
+const CACHE_VERSION = 'v20';
 const CACHE_NAME = `servicuba-${CACHE_VERSION}`;
 
 const CORE_URLS = [
