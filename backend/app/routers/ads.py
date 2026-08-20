@@ -1,127 +1,89 @@
 import json
 import random
 from datetime import datetime, timedelta
-
+from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
-
 from ..database import get_db
 from ..models.user import User
 from ..models.ad import Ad
 from ..models.payment import Payment, PaymentType, PaymentStatus
-from ..schemas.ad import AdResponse
+from ..schemas.ad import AdResponse, PromotionalAdCreate
 from ..services.auth import get_current_user, get_current_admin
+from ..services.plans import can_create_promotional_ads, PRECIO_ANUNCIO_POR_DIA, MONEDA_DEFECTO
 
 router = APIRouter()
 
 
-def _elegir_sin_repetir(candidatos: list[Ad], excluidos: set[str]) -> Ad | None:
-    """Elige al azar entre los anuncios que TODAVÍA no se mostraron en
-    este ciclo (según `excluidos`, ids que el frontend ya vio). Si ya se
-    mostraron todos los candidatos disponibles, se reinicia el ciclo
-    eligiendo entre todos de nuevo — así nunca se repite un anuncio
-    mientras queden otros sin mostrar, pero tampoco se queda sin poder
-    elegir cuando se agotan."""
+def _elegir_sin_repetir(candidatos, excluidos):
     if not candidatos:
         return None
-    no_vistos = [a for a in candidatos if str(a.id) not in excluidos]
-    pool = no_vistos if no_vistos else candidatos
+    pool = [a for a in candidatos if str(a.id) not in excluidos] or candidatos
     return random.choice(pool)
 
 
-@router.get("/active", response_model=AdResponse | None)
-def get_active_ad(
-    category_id: int | None = None,
-    excluir: str | None = None,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-):
-    """Devuelve un anuncio activo para mostrar y cuenta la impresión."""
-    now = datetime.utcnow()
-    base_query = db.query(Ad).filter(
-        Ad.activo == True,  # noqa: E712
-        Ad.fecha_inicio <= now,
-        Ad.fecha_fin >= now,
-    )
-    excluidos = {x.strip() for x in excluir.split(",")} if excluir else set()
-    excluidos.discard("")
+@router.post("/promotional", response_model=AdResponse, status_code=201, summary="Crear anuncio promocional PREMIUM")
+def create_promotional_ad(payload: PromotionalAdCreate, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    if not can_create_promotional_ads(current_user):
+        raise HTTPException(status_code=403, detail="Los anuncios promocionales son exclusivos del plan PREMIUM activo")
+    # El anuncio y su cobro nacen juntos, pero permanecen fuera de circulación
+    # hasta que administración confirme el pago y apruebe la publicación.
+    payment = Payment(user_id=current_user.id, tipo=PaymentType.ANUNCIO, estado=PaymentStatus.PENDIENTE, monto=PRECIO_ANUNCIO_POR_DIA, moneda=MONEDA_DEFECTO, notas=json.dumps({"dias": 1, "origen": "anuncio_promocional"}))
+    db.add(payment)
+    db.flush()
+    ad = Ad(owner_id=current_user.id, marca=current_user.nombre, titulo=payload.titulo, texto=payload.descripcion, imagen=payload.imagen, precio_servicio=payload.precio_servicio, contacto=payload.contacto or current_user.telefono, categoria_id=payload.categoria_id, estado="pendiente_pago", activo=False, payment_id=payment.id)
+    db.add(ad); db.commit(); db.refresh(ad)
+    return ad
 
+
+@router.get("/mine", response_model=list[AdResponse], summary="Mis anuncios promocionales")
+def get_my_ads(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    return db.query(Ad).filter(Ad.owner_id == current_user.id).order_by(Ad.created_at.desc()).all()
+
+
+@router.get("/active", response_model=AdResponse | None)
+def get_active_ad(category_id: int | None = None, excluir: str | None = None, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    now = datetime.utcnow()
+    q = db.query(Ad).filter(Ad.activo == True, Ad.estado == "activo", Ad.fecha_inicio <= now, Ad.fecha_fin >= now)
+    excluded = {x.strip() for x in excluir.split(",")} if excluir else set(); excluded.discard("")
     ad = None
     if category_id is not None:
-        segmentados = base_query.filter(Ad.categoria_id == category_id).all()
-        ad = _elegir_sin_repetir(segmentados, excluidos)
-
+        ad = _elegir_sin_repetir(q.filter(Ad.categoria_id == category_id).all(), excluded)
     if ad is None:
-        generales = base_query.filter(Ad.categoria_id.is_(None)).all()
-        ad = _elegir_sin_repetir(generales, excluidos)
-
-    if ad is None:
-        return None
-
-    ad.impresiones += 1
-    db.commit()
-    db.refresh(ad)
-    return ad
+        ad = _elegir_sin_repetir(q.filter(Ad.categoria_id.is_(None)).all(), excluded)
+    if ad is None: return None
+    ad.impresiones += 1; db.commit(); db.refresh(ad); return ad
 
 
 @router.post("/{ad_id}/click")
-def register_click(
-    ad_id: str,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-):
+def register_click(ad_id: UUID, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     ad = db.query(Ad).filter(Ad.id == ad_id).first()
-    if not ad:
-        raise HTTPException(status_code=404, detail="Anuncio no encontrado")
-    ad.clics += 1
-    db.commit()
-    return {"url_destino": ad.url_destino}
+    if not ad: raise HTTPException(status_code=404, detail="Anuncio no encontrado")
+    ad.clics += 1; db.commit(); return {"url_destino": ad.url_destino, "contacto": ad.contacto}
 
-
-# ---------- Administración ----------
 
 @router.get("/", response_model=list[AdResponse])
-def list_ads(
-    db: Session = Depends(get_db),
-    _admin: User = Depends(get_current_admin),
-):
+def list_ads(db: Session = Depends(get_db), _admin: User = Depends(get_current_admin)):
     return db.query(Ad).order_by(Ad.created_at.desc()).all()
 
 
-@router.post("/{ad_id}/toggle", response_model=AdResponse)
-def toggle_ad(
-    ad_id: str,
-    db: Session = Depends(get_db),
-    _admin: User = Depends(get_current_admin),
-):
+@router.post("/{ad_id}/approve", response_model=AdResponse, summary="Aprobar anuncio tras confirmar pago")
+def approve_ad(ad_id: UUID, db: Session = Depends(get_db), _admin: User = Depends(get_current_admin)):
     ad = db.query(Ad).filter(Ad.id == ad_id).with_for_update().first()
-    if not ad:
-        raise HTTPException(status_code=404, detail="Anuncio no encontrado")
+    if not ad: raise HTTPException(status_code=404, detail="Anuncio no encontrado")
+    payment = db.query(Payment).filter(Payment.id == ad.payment_id).first() if ad.payment_id else None
+    if not payment or payment.estado != PaymentStatus.CONFIRMADO:
+        raise HTTPException(status_code=409, detail="Confirma el pago antes de aprobar el anuncio")
+    now = datetime.utcnow(); days = 1
+    try: days = max(1, min(90, int(json.loads(payment.notas or "{}").get("dias", 1))))
+    except (TypeError, ValueError, json.JSONDecodeError): pass
+    ad.fecha_inicio = now; ad.fecha_fin = now + timedelta(days=days); ad.activo = True; ad.estado = "activo"; payment.entitlement_expires_at = ad.fecha_fin
+    db.commit(); db.refresh(ad); return ad
 
-    if not ad.activo:
-        # Un anuncio pagado entra INACTIVO y no consume su duración hasta
-        # que moderación lo aprueba. La duración se recupera del pago que
-        # originó el anuncio; no confiamos en datos enviados por el cliente.
-        if not ad.payment_id:
-            raise HTTPException(status_code=409, detail="El anuncio no tiene un pago asociado")
-        payment = db.query(Payment).filter(Payment.id == ad.payment_id).first()
-        if not payment or payment.tipo != PaymentType.ANUNCIO or payment.estado != PaymentStatus.CONFIRMADO:
-            raise HTTPException(status_code=409, detail="El pago asociado al anuncio no está confirmado")
-        try:
-            detalle = json.loads(payment.notas) if payment.notas else {}
-            dias = int(detalle.get("dias", 0))
-        except (TypeError, ValueError, json.JSONDecodeError):
-            raise HTTPException(status_code=409, detail="La duración del anuncio no es válida")
-        if not 1 <= dias <= 90:
-            raise HTTPException(status_code=409, detail="La duración del anuncio no es válida")
-        now = datetime.utcnow()
-        ad.fecha_inicio = now
-        ad.fecha_fin = now + timedelta(days=dias)
-        payment.entitlement_expires_at = ad.fecha_fin
-        ad.activo = True
-    else:
-        ad.activo = False
 
-    db.commit()
-    db.refresh(ad)
-    return ad
+@router.post("/{ad_id}/toggle", response_model=AdResponse)
+def toggle_ad(ad_id: UUID, db: Session = Depends(get_db), admin: User = Depends(get_current_admin)):
+    ad = db.query(Ad).filter(Ad.id == ad_id).with_for_update().first()
+    if not ad: raise HTTPException(status_code=404, detail="Anuncio no encontrado")
+    if not ad.activo: return approve_ad(ad_id, db, admin)
+    ad.activo = False; ad.estado = "pausado"; db.commit(); db.refresh(ad); return ad
