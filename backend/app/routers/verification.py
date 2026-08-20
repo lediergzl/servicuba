@@ -8,43 +8,38 @@ from ..database import get_db
 from ..models.user import User
 from ..schemas.verification import VerificationConfirm
 from ..services.auth import get_current_user
+from ..services.email import send_email
 from ..utils.security import get_password_hash, verify_password
 
 router = APIRouter()
-
 CODE_TTL_MINUTES = 10
 
 
 @router.post("/send")
-def send_verification_code(
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-):
+def send_verification_code(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     if current_user.verificado:
         raise HTTPException(status_code=400, detail="Tu cuenta ya está verificada")
+    if not current_user.email:
+        raise HTTPException(status_code=400, detail="Tu cuenta no tiene un correo electrónico configurado")
 
-    # OTP generado con CSPRNG y almacenado únicamente como hash. El código
-    # jamás se devuelve por API: en producción debe entregarlo el proveedor
-    # SMS/WhatsApp conectado a este punto.
     codigo = f"{secrets.randbelow(1_000_000):06d}"
     current_user.codigo_verificacion = get_password_hash(codigo)
     current_user.codigo_verificacion_expira = datetime.utcnow() + timedelta(minutes=CODE_TTL_MINUTES)
     db.commit()
+    try:
+        send_email(
+            current_user.email,
+            "Código de verificación — ServiCuba",
+            f"Hola {current_user.nombre},\n\nTu código de verificación es: {codigo}\n\nEste código vence en {CODE_TTL_MINUTES} minutos.\n\nServiCuba",
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail="No se pudo enviar el correo de verificación. Intenta nuevamente.") from exc
 
-    # No revelar el OTP ni si existe un canal de entrega. El proveedor de
-    # mensajería debe consumir `codigo` antes de que termine esta operación.
-    return {
-        "message": "Código de verificación enviado",
-        "expira_en_minutos": CODE_TTL_MINUTES,
-    }
+    return {"message": "Código de verificación enviado a tu correo.", "expira_en_minutos": CODE_TTL_MINUTES}
 
 
 @router.post("/confirm")
-def confirm_verification_code(
-    body: VerificationConfirm,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-):
+def confirm_verification_code(body: VerificationConfirm, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     if current_user.verificado:
         raise HTTPException(status_code=400, detail="Tu cuenta ya está verificada")
     if not current_user.codigo_verificacion or not current_user.codigo_verificacion_expira:
