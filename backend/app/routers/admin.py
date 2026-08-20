@@ -11,7 +11,7 @@ from ..models.payment import Payment, PaymentStatus, PaymentType
 from ..models.report import Report, ReportStatus
 from ..models.task import Task, TaskStatus
 from ..models.user import User
-from ..services.auth import get_current_admin
+from ..services.auth import get_current_admin, get_optional_current_user
 
 router = APIRouter()
 
@@ -21,8 +21,17 @@ def _audit(db: Session, admin: User, action: str, target_type: str, target_id: s
 
 
 @router.get("/status")
-def admin_status(admin: User = Depends(get_current_admin)):
-    return {"authorized": True, "es_admin": True, "user_id": str(admin.id)}
+def admin_status(current_user: User | None = Depends(get_optional_current_user)):
+    """Cheap capability probe used by the SPA.
+
+    A non-admin (including a logged-out visitor) is a normal negative result,
+    not an authorization error. This prevents the frontend from generating a
+    403 on every app load while the actual admin endpoints remain protected by
+    get_current_admin below.
+    """
+    if not current_user or not current_user.es_admin:
+        return {"authorized": False, "es_admin": False}
+    return {"authorized": True, "es_admin": True, "user_id": str(current_user.id)}
 
 
 @router.get("/metrics")
