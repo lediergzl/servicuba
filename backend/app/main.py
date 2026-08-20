@@ -85,8 +85,8 @@ for router, prefix, tags in [
 ]:
     app.include_router(router, prefix=prefix, tags=tags)
 
-@app.get("/api/health")
-def health():
+
+def _health_response():
     try:
         with engine.connect() as conn:
             conn.execute(text("SELECT 1"))
@@ -94,6 +94,28 @@ def health():
     except Exception:
         logger.exception("Health check: database unavailable")
         raise HTTPException(status_code=503, detail="Servicio temporalmente no disponible")
+
+
+@app.get("/health", tags=["Health"])
+def health():
+    """Health check para Render y monitorización externa."""
+    return _health_response()
+
+
+# Mantener compatibilidad con el endpoint existente de la API.
+@app.get("/api/health", tags=["Health"])
+def api_health():
+    """Health check de compatibilidad bajo /api."""
+    return _health_response()
+
+SEO_CITIES = {"la-habana": "La Habana", "santiago-de-cuba": "Santiago de Cuba", "holguin": "Holguín", "camaguey": "Camagüey", "santa-clara": "Santa Clara"}
+SEO_SERVICES = {"electricistas": "Electricistas", "plomeros": "Plomeros", "reparadores": "Reparadores", "albaniles": "Albañiles", "pintores": "Pintores"}
+SEO_BASE = "https://servicuba.onrender.com"
+
+def _seo_document(title: str, description: str, canonical: str, body: str) -> HTMLResponse:
+    schema = json.dumps({"@context": "https://schema.org", "@type": "WebPage", "name": title, "description": description, "url": canonical, "isPartOf": {"@type": "WebSite", "name": "ServiCuba", "url": SEO_BASE}}, ensure_ascii=False)
+    html = f'''<!doctype html><html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>{escape(title)}</title><meta name="description" content="{escape(description)}"><link rel="canonical" href="{escape(canonical)}"><meta property="og:title" content="{escape(title)}"><meta property="og:description" content="{escape(description)}"><meta property="og:type" content="website"><meta property="og:url" content="{escape(canonical)}"><script type="application/ld+json">{schema}</script></head><body><main>{body}</main></body></html>'''
+    return HTMLResponse(html)
 
 SEO_CITIES = {"la-habana": "La Habana", "santiago-de-cuba": "Santiago de Cuba", "holguin": "Holguín", "camaguey": "Camagüey", "santa-clara": "Santa Clara"}
 SEO_SERVICES = {"electricistas": "Electricistas", "plomeros": "Plomeros", "reparadores": "Reparadores", "albaniles": "Albañiles", "pintores": "Pintores"}
