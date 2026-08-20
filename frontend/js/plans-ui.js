@@ -183,6 +183,24 @@ async function loadEntitlements() {
         return;
     }
     installStyles();
+
+    if (entitlements.anonymous) {
+        // Visitante sin sesión: el botón flotante sigue siendo el único
+        // punto de descubrimiento de precios/planes antes de registrarse,
+        // así que se mantiene como estaba.
+        renderFloatingEntry();
+        return;
+    }
+
+    // Usuario con sesión: un overlay fijo persiguiéndolo por toda la app
+    // no aporta nada — si ya tiene Premium no hay nada que ofrecerle, y
+    // si no lo tiene, el lugar correcto es el menú de su perfil (junto al
+    // resto de acciones de cuenta), no un botón flotante permanente.
+    removeFloatingEntry();
+    updateProfileMenuEntry();
+}
+
+function renderFloatingEntry() {
     let entry = document.getElementById('plansEntry');
     if (!entry) {
         entry = document.createElement('button');
@@ -195,6 +213,26 @@ async function loadEntitlements() {
     entry.onclick = openPlans;
 }
 
+function removeFloatingEntry() {
+    document.getElementById('plansEntry')?.remove();
+}
+
+function updateProfileMenuEntry() {
+    const btn = document.getElementById('verPlanesBtn');
+    if (!btn) return;
+    if (entitlements.plan === 'premium') {
+        // Ya tiene el plan más alto: no hay nada que mostrarle.
+        btn.classList.add('hidden');
+        btn.onclick = null;
+        return;
+    }
+    const name = PLAN_COPY[entitlements.plan]?.name || entitlements.plan;
+    const label = document.getElementById('verPlanesBtnLabel');
+    if (label) label.textContent = `Ver planes (actual: ${name})`;
+    btn.classList.remove('hidden');
+    btn.onclick = openPlans;
+}
+
 export function initPlansUi() {
     loadEntitlements();
     // Si el usuario recién inició sesión, activó su perfil de trabajador o
@@ -203,4 +241,9 @@ export function initPlansUi() {
     // tenga que recargar la página.
     document.addEventListener('auth:changed', loadEntitlements);
     document.addEventListener('servicuba:data-refreshed', loadEntitlements);
+    // Al entrar a Perfil (donde ahora vive el CTA de planes para usuarios
+    // con sesión), revalida por si el plan cambió desde la última carga.
+    document.addEventListener('click', event => {
+        if (event.target.closest('[data-view="perfil"]')) setTimeout(loadEntitlements, 0);
+    });
 }
