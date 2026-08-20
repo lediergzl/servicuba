@@ -1,14 +1,14 @@
 """add user email
 
 Revision ID: 20260820_user_email
-Revises: 20260820_premium_ads
+Revises: 20260819_01
 Create Date: 2026-08-20
 """
 from alembic import op
 import sqlalchemy as sa
 
 revision = "20260820_user_email"
-down_revision = "20260820_premium_ads"
+down_revision = "20260819_01"
 branch_labels = None
 depends_on = None
 
