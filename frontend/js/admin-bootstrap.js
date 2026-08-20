@@ -16,7 +16,10 @@ async function refreshAdminAccess() {
         // mantenemos compatibilidad con el chequeo del perfil existente.
         let allowed = false;
         try {
-            const status = await apiFetch('/admin/status');
+            // 403 acá es el resultado normal para cualquier usuario que no
+            // es admin (get_current_admin en el backend) — no es un fallo
+            // que amerite quedar en consola en cada carga de la app.
+            const status = await apiFetch('/admin/status', { silentStatuses: [403] });
             allowed = status?.is_admin === true || status?.es_admin === true || status?.authorized === true;
         } catch (err) {
             if (String(err?.message || '').includes('No autorizado')) allowed = false;
