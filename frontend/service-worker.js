@@ -1,9 +1,8 @@
-// v15: estrategia de carga tolerante a conexiones lentas.
-// El shell crítico se instala sin bloquear por recursos secundarios.
-const CACHE_VERSION = 'v15';
+// v16: estrategia de carga tolerante a conexiones lentas y fallos de red.
+// Nunca devolvemos undefined desde un fetch handler.
+const CACHE_VERSION = 'v16';
 const CACHE_NAME = `servicuba-${CACHE_VERSION}`;
 
-// Sólo recursos indispensables para arrancar la interfaz offline.
 const CORE_URLS = [
   '/',
   '/index.html',
@@ -18,16 +17,12 @@ const CORE_URLS = [
 self.addEventListener('install', event => {
   event.waitUntil((async () => {
     const cache = await caches.open(CACHE_NAME);
-    // No usamos addAll: un único recurso lento o fallido no debe impedir
-    // que el Service Worker complete la instalación.
     await Promise.allSettled(
       CORE_URLS.map(async url => {
         try {
           const response = await fetch(url, { cache: 'no-cache' });
           if (response && response.ok) await cache.put(url, response.clone());
-        } catch (_) {
-          // Se recuperará desde red o caché existente en la próxima petición.
-        }
+        } catch (_) {}
       })
     );
     await self.skipWaiting();
@@ -45,22 +40,32 @@ self.addEventListener('activate', event => {
 const CACHE_FIRST_PATTERNS = [/\/assets\/icons\//];
 const APP_SHELL_PATTERNS = [/^https?:\/\/[^/]+\/$/, /\/index\.html$/, /\/css\//, /\/js\//, /\/manifest\.json$/];
 
+// A fetch handler MUST always resolve to a Response (or throw/reject).
+// caches.match() resolves undefined when the resource is absent, so every
+// cache fallback below is normalized to a real Response.
+const emptyCacheFallback = () => Response.error();
+
 self.addEventListener('fetch', event => {
   if (event.request.method !== 'GET') return;
 
   const url = event.request.url;
-  if (url.includes('/api/')) return; // nunca cachear datos autenticados
+  if (url.includes('/api/')) return;
 
   const cacheFirst = CACHE_FIRST_PATTERNS.some(re => re.test(url));
   if (cacheFirst) {
-    event.respondWith(
-      caches.match(event.request).then(cached => cached || fetch(event.request))
-    );
+    event.respondWith((async () => {
+      const cached = await caches.match(event.request);
+      if (cached) return cached;
+      try {
+        const response = await fetch(event.request);
+        return response || emptyCacheFallback();
+      } catch (_) {
+        return emptyCacheFallback();
+      }
+    })());
     return;
   }
 
-  // Para JS/CSS/HTML usamos stale-while-revalidate: la interfaz responde
-  // inmediatamente desde caché y se actualiza en segundo plano.
   const isAppShell = APP_SHELL_PATTERNS.some(re => re.test(url));
   if (isAppShell) {
     event.respondWith((async () => {
@@ -71,30 +76,32 @@ self.addEventListener('fetch', event => {
             const cache = await caches.open(CACHE_NAME);
             await cache.put(event.request, response.clone());
           }
-          return response;
+          return response || emptyCacheFallback();
         })
-        .catch(() => null);
+        .catch(() => emptyCacheFallback());
+
       if (cached) {
-        event.waitUntil(network);
+        event.waitUntil(network.catch(() => undefined));
         return cached;
       }
-      return (await network) || cached || Response.error();
+      return network;
     })());
     return;
   }
 
-  // Recursos no críticos: red primero y fallback a caché.
-  event.respondWith(
-    fetch(event.request)
-      .then(async response => {
-        if (response && response.ok && new URL(url).origin === self.location.origin) {
-          const cache = await caches.open(CACHE_NAME);
-          await cache.put(event.request, response.clone());
-        }
-        return response;
-      })
-      .catch(() => caches.match(event.request))
-  );
+  // Recursos no críticos: red primero y fallback seguro a caché.
+  event.respondWith((async () => {
+    try {
+      const response = await fetch(event.request);
+      if (response && response.ok && new URL(url).origin === self.location.origin) {
+        const cache = await caches.open(CACHE_NAME);
+        await cache.put(event.request, response.clone());
+      }
+      return response || (await caches.match(event.request)) || emptyCacheFallback();
+    } catch (_) {
+      return (await caches.match(event.request)) || emptyCacheFallback();
+    }
+  })());
 });
 
 self.addEventListener('push', event => {
