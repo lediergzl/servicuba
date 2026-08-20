@@ -1,19 +1,21 @@
 """premium promotional ads
 
 Revision ID: 20260820_premium_ads
-Revises: None
+Revises: 20260819_01
 Create Date: 2026-08-20
 """
 from alembic import op
 import sqlalchemy as sa
 
 revision = "20260820_premium_ads"
-down_revision = None
+down_revision = "20260819_01"
 branch_labels = None
 depends_on = None
 
 
 def upgrade():
+    # This migration is additive and is intentionally linked to the production
+    # baseline so Alembic has a single linear head.
     op.add_column("ads", sa.Column("owner_id", sa.dialects.postgresql.UUID(as_uuid=True), nullable=True))
     op.create_foreign_key("fk_ads_owner", "ads", "users", ["owner_id"], ["id"])
     op.create_index("ix_ads_owner_id", "ads", ["owner_id"])
