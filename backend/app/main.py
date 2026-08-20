@@ -13,7 +13,7 @@ from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import JSONResponse, HTMLResponse
 
-from .routers import auth, users, categories, tasks, applications, reviews, chat, push, native_push, verification, payments, ads, password_reset, task_lifecycle, admin, discovery, dashboard, reports, uploads
+from .routers import auth, users, categories, tasks, applications, reviews, chat, push, native_push, notifications_stream, verification, payments, ads, password_reset, task_lifecycle, admin, discovery, dashboard, reports, uploads
 from .database import engine, SessionLocal
 from .models.category import Category
 from .models.user import User, UserRole
@@ -78,6 +78,7 @@ for router, prefix, tags in [
     (applications.router, "/api/applications", ["Applications"]), (reviews.router, "/api/reviews", ["Reviews"]),
     (reports.router, "/api/reports", ["Reports"]), (chat.router, "/api/chat", ["Chat"]),
     (push.router, "/api/push", ["Push"]), (native_push.router, "/api/push", ["Native Push"]),
+    (notifications_stream.router, "/api/push", ["Push Stream"]),
     (verification.router, "/api/verification", ["Verification"]), (payments.router, "/api/payments", ["Payments"]),
     (ads.router, "/api/ads", ["Ads"]), (admin.router, "/api/admin", ["Admin"]),
     (uploads.router, "/api/uploads", ["Uploads"]),

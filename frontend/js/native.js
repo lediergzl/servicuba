@@ -2,6 +2,15 @@
 // La app usa server.url, por lo que este código NO importa paquetes npm de
 // Capacitor: dentro de la APK accede al bridge global inyectado por Capacitor;
 // en un navegador normal simplemente informa que no hay plataforma nativa.
+//
+// IMPORTANTE: se quitó el uso del plugin Capacitor "PushNotifications"
+// (push.requestPermissions / push.register). Ese plugin requiere Firebase
+// Cloud Messaging configurado en el proyecto Android (google-services.json),
+// y Firebase está bloqueado/no es confiable desde Cuba (embargo de EE.UU.).
+// Llamarlo sin esa configuración provocaba un crash nativo de la app (no
+// capturable desde JS). En su lugar usamos el plugin "LocalNotifications"
+// (100% en el dispositivo, sin ningún servicio de Google) combinado con una
+// conexión SSE al backend — ver push-native.js.
 
 function capacitor() {
     return window.Capacitor || null;
@@ -41,21 +50,28 @@ export async function nativeGetCurrentPosition(options = {}) {
     });
 }
 
-export async function nativeRequestPushPermission() {
-    const push = plugin('PushNotifications');
-    if (!isNativeApp() || !push?.requestPermissions) return null;
-    const result = await push.requestPermissions();
-    return result?.receive || result;
+// --- Notificaciones locales (reemplazo de PushNotifications/Firebase) ---
+
+export async function nativeRequestLocalNotifPermission() {
+    const local = plugin('LocalNotifications');
+    if (!isNativeApp() || !local?.requestPermissions) return null;
+    const result = await local.requestPermissions();
+    return result?.display || result;
 }
 
-export async function nativeRegisterPush() {
-    const push = plugin('PushNotifications');
-    if (!isNativeApp() || !push?.register) return null;
-    return push.register();
-}
+let _localNotifIdCounter = 1;
 
-export function nativeAddPushListener(event, callback) {
-    const push = plugin('PushNotifications');
-    if (!isNativeApp() || !push?.addListener) return null;
-    return push.addListener(event, callback);
+export async function nativeShowLocalNotification(title, body, url = '/') {
+    const local = plugin('LocalNotifications');
+    if (!isNativeApp() || !local?.schedule) return null;
+    const id = _localNotifIdCounter = (_localNotifIdCounter % 2147483647) + 1;
+    return local.schedule({
+        notifications: [{
+            id,
+            title,
+            body,
+            extra: { url },
+            schedule: { at: new Date(Date.now() + 100) }
+        }]
+    });
 }
