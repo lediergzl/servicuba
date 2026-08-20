@@ -20,6 +20,7 @@ def build_user_response(db: Session, user: User) -> dict:
         "id": user.id,
         "nombre": user.nombre,
         "telefono": user.telefono,
+        "email": user.email,
         "rating": user.rating or 0.0,
         "verificado": user.verificado,
         "plan": plan,
@@ -37,8 +38,6 @@ def build_user_response(db: Session, user: User) -> dict:
         "precio_hora": user.precio_hora,
         "municipio": user.municipio,
         "zona": user.zona,
-        # Entitlements explícitos para que el frontend pueda explicar qué
-        # puede hacer esta cuenta sin duplicar reglas comerciales.
         "entitlements": {
             "puede_contratar": bool(user.es_cliente),
             "puede_publicar_servicios": bool(user.es_trabajador),
