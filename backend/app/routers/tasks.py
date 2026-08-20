@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 from sqlalchemy import func, cast
 from datetime import datetime
@@ -60,15 +60,16 @@ def _task_payload(task, distance=None, task_lat=None, task_lng=None, current_use
 
 
 @router.post("", response_model=TaskResponse)
-def create_task(task: TaskCreate, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+def create_task(task: TaskCreate, background_tasks: BackgroundTasks, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     if not current_user.es_cliente:
         raise HTTPException(status_code=403, detail="Activa tu perfil de cliente para crear tareas")
     _validar_permiso_publicacion(db, current_user, "necesidad")
     point = ST_SetSRID(ST_MakePoint(task.lng, task.lat), 4326)
     db_task = Task(cliente_id=current_user.id, categoria_id=task.categoria_id, titulo=task.titulo, descripcion=task.descripcion, precio=task.precio, ubicacion=point, municipio=task.municipio, zona=task.zona, referencia=task.referencia, estado=TaskStatus.ACTIVA, tipo="necesidad")
     db.add(db_task); db.commit(); db.refresh(db_task)
-    try: notificar_nuevos_trabajadores_cercanos(db, db_task, task.lat, task.lng)
-    except Exception: logger.warning("No se pudo notificar a trabajadores cercanos de la tarea %s", db_task.id, exc_info=True)
+    # La creación no debe esperar a que terminen todos los envíos push.
+    # BackgroundTasks se ejecuta después de producir la respuesta HTTP.
+    background_tasks.add_task(notificar_nuevos_trabajadores_cercanos, db, db_task, task.lat, task.lng)
     return db_task
 
 
@@ -86,11 +87,6 @@ def get_nearby_tasks(lat: float = Query(...), lng: float = Query(...), radius_km
         if current_user.es_trabajador and not has_priority_access(current_user, task, now):
             continue
         visible.append(_task_payload(task, dist, task_lat, task_lng, current_user, now))
-
-    # El beneficio Premium no es sólo recibir antes la notificación:
-    # dentro del panel las mejores oportunidades deben aparecer primero.
-    # La ventana de acceso anticipado también se coloca arriba para que
-    # el trabajador Premium vea inmediatamente aquello que acaba de abrirse.
     if is_premium_active(current_user):
         visible.sort(key=lambda item: (
             item.get("priority") != "best",
@@ -113,14 +109,51 @@ def get_my_ofertas(db: Session = Depends(get_db), current_user: User = Depends(g
 
 
 def _get_my_publications(db: Session, current_user: User, tipo: str):
-    tasks = db.query(Task).filter(Task.cliente_id == current_user.id, Task.tipo == tipo).order_by(Task.created_at.desc()).all(); now = datetime.utcnow(); result=[]
+    """Carga publicaciones sin consultas N+1 por trabajador y reseñas."""
+    tasks = db.query(Task).filter(
+        Task.cliente_id == current_user.id, Task.tipo == tipo
+    ).order_by(Task.created_at.desc()).all()
+    if not tasks:
+        return []
+
+    now = datetime.utcnow()
+    task_ids = [task.id for task in tasks]
+
+    # Una consulta para todas las asignaciones, en lugar de una por tarea.
+    assignments = db.query(
+        Application.task_id, User.id, User.nombre
+    ).join(User, Application.worker_id == User.id).filter(
+        Application.task_id.in_(task_ids),
+        Application.estado == AppStatus.ACEPTADA,
+    ).all()
+    assigned_by_task = {
+        task_id: (str(user_id), user_name)
+        for task_id, user_id, user_name in assignments
+    }
+
+    # Una consulta para saber qué tareas ya tienen reseña.
+    reviewed_ids = {
+        row[0] for row in db.query(Review.task_id).filter(
+            Review.task_id.in_(task_ids)
+        ).all()
+    }
+
+    result = []
     for task in tasks:
-        assigned_user_id = assigned_user_name = None
-        if task.estado.value in ("asignada", "en_proceso", "completada", "confirmada"):
-            row = db.query(User.id, User.nombre).join(Application, Application.worker_id == User.id).filter(Application.task_id == task.id, Application.estado == AppStatus.ACEPTADA).first()
-            if row: assigned_user_id, assigned_user_name = str(row.id), row.nombre
-        ya_reseniada = task.estado.value in ("completada", "confirmada") and db.query(Review).filter(Review.task_id == task.id).first() is not None
-        result.append({"id":str(task.id),"cliente_id":str(task.cliente_id),"categoria_id":task.categoria_id,"titulo":task.titulo,"descripcion":task.descripcion,"precio":task.precio,"municipio":task.municipio,"zona":task.zona,"referencia":task.referencia,"estado":task.estado.value,"destacada":bool(task.destacada and task.destacada_hasta and task.destacada_hasta>now),"destacada_hasta":task.destacada_hasta,"created_at":task.created_at,"worker_id":None,"worker_nombre":None,"cliente_id_asignado":assigned_user_id,"cliente_nombre":assigned_user_name,"ya_reseniada":ya_reseniada})
+        assigned_user_id, assigned_user_name = assigned_by_task.get(task.id, (None, None))
+        result.append({
+            "id": str(task.id), "cliente_id": str(task.cliente_id),
+            "categoria_id": task.categoria_id, "titulo": task.titulo,
+            "descripcion": task.descripcion, "precio": task.precio,
+            "municipio": task.municipio, "zona": task.zona,
+            "referencia": task.referencia, "estado": task.estado.value,
+            "destacada": bool(task.destacada and task.destacada_hasta and task.destacada_hasta > now),
+            "destacada_hasta": task.destacada_hasta, "created_at": task.created_at,
+            "worker_id": None, "worker_nombre": None,
+            "cliente_id_asignado": assigned_user_id,
+            "cliente_nombre": assigned_user_name,
+            "ya_reseniada": task.id in reviewed_ids,
+        })
     return result
 
 
