@@ -54,6 +54,25 @@ function closeAdmin() {
     document.getElementById('perfilView')?.classList.remove('hidden');
 }
 
+// Los enlaces de descubrimiento de la landing también existen para visitantes.
+// Si ya hay una sesión válida, nunca debemos volver a enviar al usuario al login.
+// Reutilizamos el mismo flujo centralizado del header, que termina llamando a
+// openWorkerView() y respeta tanto perfiles de trabajador como cuentas que aún
+// necesitan completar su activación profesional.
+function installAuthenticatedLandingRouting() {
+    document.addEventListener('click', e => {
+        const workerLink = e.target.closest('#landingWorkerLink');
+        if (!workerLink || !localStorage.getItem('token')) return;
+
+        const workerNav = document.querySelector('[data-header-view="dashboardTrabajador"]');
+        if (!workerNav) return;
+
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        workerNav.click();
+    }, true);
+}
+
 function init() {
     if (initialized) return;
     initialized = true;
@@ -61,6 +80,7 @@ function init() {
     document.getElementById('adminPanelBtn')?.addEventListener('click', openAdmin);
     document.getElementById('adminBackBtn')?.addEventListener('click', closeAdmin);
     refreshAdminAccess();
+    installAuthenticatedLandingRouting();
     document.addEventListener('auth:changed', refreshAdminAccess);
     document.addEventListener('auth:expired', () => document.getElementById('adminPanelBtn')?.classList.add('hidden'));
     window.addEventListener('storage', e => { if (e.key === 'token') refreshAdminAccess(); });
