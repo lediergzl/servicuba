@@ -10,6 +10,7 @@ class UserCreate(BaseModel):
 
     nombre: str = Field(min_length=2, max_length=100)
     telefono: str = Field(min_length=7, max_length=30)
+    email: str = Field(min_length=5, max_length=254)
     password: str = Field(min_length=8, max_length=128)
     es_trabajador: bool = False
     categoria_id: Optional[int] = Field(default=None, ge=1)
@@ -28,6 +29,14 @@ class UserCreate(BaseModel):
             raise ValueError("Teléfono inválido")
         return normalized
 
+    @field_validator("email")
+    @classmethod
+    def validate_email(cls, value: str) -> str:
+        value = value.strip().lower()
+        if not re.fullmatch(r"[^\s@]+@[^\s@]+\.[^\s@]+", value):
+            raise ValueError("Correo electrónico inválido")
+        return value
+
     @field_validator("password")
     @classmethod
     def validate_password(cls, value: str) -> str:
@@ -40,7 +49,6 @@ class UserCreate(BaseModel):
 
 class UserLogin(BaseModel):
     model_config = ConfigDict(str_strip_whitespace=True)
-
     telefono: str = Field(min_length=7, max_length=30)
     password: str = Field(min_length=1, max_length=128)
 
@@ -73,6 +81,7 @@ class UserResponse(BaseModel):
     id: UUID
     nombre: str
     telefono: str
+    email: Optional[str] = None
     rating: float
     verificado: bool
     plan: str
