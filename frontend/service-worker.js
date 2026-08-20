@@ -1,74 +1,96 @@
-// Sube este número en CADA deploy que toque archivos de frontend/js o 
-// frontend/css. El app shell usa network-first, pero cambiar la versión
-// fuerza además la instalación de un nuevo service worker y elimina caches
-// anteriores, evitando que una PWA instalada conserve una versión vieja.
-// v14: foto de perfil real (Cloudinary), select con estilo propio,
-// skeleton loading en el directorio, texto "Nuevo en ServiCuba" unificado.
-const CACHE_VERSION = 'v14';
+// v15: estrategia de carga tolerante a conexiones lentas.
+// El shell crítico se instala sin bloquear por recursos secundarios.
+const CACHE_VERSION = 'v15';
 const CACHE_NAME = `servicuba-${CACHE_VERSION}`;
 
-const urlsToCache = [
+// Sólo recursos indispensables para arrancar la interfaz offline.
+const CORE_URLS = [
   '/',
   '/index.html',
   '/css/style.css',
   '/js/app.js',
   '/js/core.js',
   '/js/auth.js',
-  '/js/tasks.js',
-  '/js/chat.js',
-  '/js/push.js',
-  '/js/verification.js',
-  '/js/monetization.js',
-  '/js/admin.js',
-  '/js/map.js',
-  '/js/utils.js',
-  '/js/landing.js',
   '/manifest.json',
-  '/assets/icons/icon-192.png',
-  '/assets/icons/icon-512.png'
+  '/assets/icons/icon-192.png'
 ];
 
 self.addEventListener('install', event => {
-  event.waitUntil(
-    caches.open(CACHE_NAME)
-      .then(cache => cache.addAll(urlsToCache))
-      .then(() => self.skipWaiting())
-  );
+  event.waitUntil((async () => {
+    const cache = await caches.open(CACHE_NAME);
+    // No usamos addAll: un único recurso lento o fallido no debe impedir
+    // que el Service Worker complete la instalación.
+    await Promise.allSettled(
+      CORE_URLS.map(async url => {
+        try {
+          const response = await fetch(url, { cache: 'no-cache' });
+          if (response && response.ok) await cache.put(url, response.clone());
+        } catch (_) {
+          // Se recuperará desde red o caché existente en la próxima petición.
+        }
+      })
+    );
+    await self.skipWaiting();
+  })());
 });
 
 self.addEventListener('activate', event => {
-  event.waitUntil(
-    caches.keys().then(cacheNames => {
-      return Promise.all(
-        cacheNames.filter(name => name !== CACHE_NAME)
-          .map(name => caches.delete(name))
-      );
-    }).then(() => self.clients.claim())
-  );
+  event.waitUntil((async () => {
+    const names = await caches.keys();
+    await Promise.all(names.filter(name => name !== CACHE_NAME).map(name => caches.delete(name)));
+    await self.clients.claim();
+  })());
 });
 
-// Network-first para el app shell: siempre intenta traer la versión más
-// reciente del servidor primero y sólo cae al caché si no hay red.
 const CACHE_FIRST_PATTERNS = [/\/assets\/icons\//];
+const APP_SHELL_PATTERNS = [/^https?:\/\/[^/]+\/$/, /\/index\.html$/, /\/css\//, /\/js\//, /\/manifest\.json$/];
 
 self.addEventListener('fetch', event => {
+  if (event.request.method !== 'GET') return;
+
   const url = event.request.url;
-  if (url.includes('/api/')) return; // nunca cachear la API ni el WS de chat
+  if (url.includes('/api/')) return; // nunca cachear datos autenticados
 
-  const useCacheFirst = CACHE_FIRST_PATTERNS.some(re => re.test(url));
-
-  if (useCacheFirst) {
+  const cacheFirst = CACHE_FIRST_PATTERNS.some(re => re.test(url));
+  if (cacheFirst) {
     event.respondWith(
       caches.match(event.request).then(cached => cached || fetch(event.request))
     );
     return;
   }
 
+  // Para JS/CSS/HTML usamos stale-while-revalidate: la interfaz responde
+  // inmediatamente desde caché y se actualiza en segundo plano.
+  const isAppShell = APP_SHELL_PATTERNS.some(re => re.test(url));
+  if (isAppShell) {
+    event.respondWith((async () => {
+      const cached = await caches.match(event.request);
+      const network = fetch(event.request)
+        .then(async response => {
+          if (response && response.ok) {
+            const cache = await caches.open(CACHE_NAME);
+            await cache.put(event.request, response.clone());
+          }
+          return response;
+        })
+        .catch(() => null);
+      if (cached) {
+        event.waitUntil(network);
+        return cached;
+      }
+      return (await network) || cached || Response.error();
+    })());
+    return;
+  }
+
+  // Recursos no críticos: red primero y fallback a caché.
   event.respondWith(
     fetch(event.request)
-      .then(response => {
-        const copy = response.clone();
-        caches.open(CACHE_NAME).then(cache => cache.put(event.request, copy)).catch(() => {});
+      .then(async response => {
+        if (response && response.ok && new URL(url).origin === self.location.origin) {
+          const cache = await caches.open(CACHE_NAME);
+          await cache.put(event.request, response.clone());
+        }
         return response;
       })
       .catch(() => caches.match(event.request))
@@ -79,7 +101,7 @@ self.addEventListener('push', event => {
   let data = { title: 'ServiCuba', body: 'Tienes una notificación nueva.', url: '/' };
   try {
     if (event.data) data = { ...data, ...event.data.json() };
-  } catch (e) {}
+  } catch (_) {}
 
   event.waitUntil(
     self.registration.showNotification(data.title, {
