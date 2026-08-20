@@ -21,11 +21,22 @@ let nearbyOfertasAbortController = null;
 // pedirlas al backend.
 let loadedCategories = [];
 
-// IDs de publicaciones (tareas U OFERTAS) a las que YA se postuló/
-// solicitó en esta sesión. Un solo Set para ambas, porque
-// GET /applications/mine ya devuelve ids de ambos tipos sin distinguir
-// — ver nota en routers/applications.py.
-const appliedTaskIds = new Set();
+// ---------- Helpers de presentación (precio, categoría) ----------
+// Antes cada tarjeta mostraba "$3000" sin separador y sin ícono de
+// categoría (getEmoji() en utils.js existía pero nadie la llamaba desde
+// aquí). categoryIcon() usa loadedCategories en vez del mapa fijo de
+// utils.js para que funcione también con categorías creadas desde el
+// panel de admin, no sólo las 4 semilla.
+
+function formatPrice(precio) {
+    return new Intl.NumberFormat('es-CU').format(Number(precio) || 0);
+}
+
+function categoryIcon(categoriaId) {
+    if (categoriaId == null) return '';
+    const cat = loadedCategories.find(c => String(c.id) === String(categoriaId));
+    return cat?.icono ? `${escapeHtml(cat.icono)} ` : '';
+}
 
 // ---------- Categorías ----------
 
@@ -109,6 +120,7 @@ export async function loadNearbyTasks() {
 
     const container = document.getElementById('listaTareas');
     if (container) container.innerHTML = renderSkeletonCards(3);
+    await ensureCategoriesLoaded();
 
     try {
         const mine = await apiFetch('/applications/mine');
@@ -183,8 +195,8 @@ function renderNearbyTasks(tasks) {
         card.style.setProperty('--i', i);
         card.innerHTML = `
             <div class="task-card__row">
-                <h3 class="task-card__title">${t.destacada ? '★ ' : ''}${escapeHtml(t.titulo)}</h3>
-                <span class="task-card__price">$${escapeHtml(String(t.precio ?? 0))}</span>
+                <h3 class="task-card__title">${t.destacada ? '★ ' : ''}${categoryIcon(t.categoria_id)}${escapeHtml(t.titulo)}</h3>
+                <span class="task-card__price">$${formatPrice(t.precio)}</span>
             </div>
             <p class="task-card__meta">
                 <span class="chip">${escapeHtml(String(t.distancia_km))} km</span>
@@ -229,6 +241,7 @@ export async function loadNearbyOfertas() {
 
     const container = document.getElementById('listaOfertasCercanas');
     if (container) container.innerHTML = renderSkeletonCards(3);
+    await ensureCategoriesLoaded();
 
     try {
         const mine = await apiFetch('/applications/mine');
@@ -290,8 +303,8 @@ function renderNearbyOfertas(ofertas) {
         card.style.setProperty('--i', i);
         card.innerHTML = `
             <div class="task-card__row">
-                <h3 class="task-card__title">${o.destacada ? '★ ' : ''}${escapeHtml(o.titulo)}</h3>
-                <span class="task-card__price">$${escapeHtml(String(o.precio ?? 0))}</span>
+                <h3 class="task-card__title">${o.destacada ? '★ ' : ''}${categoryIcon(o.categoria_id)}${escapeHtml(o.titulo)}</h3>
+                <span class="task-card__price">$${formatPrice(o.precio)}</span>
             </div>
             ${o.descripcion ? `<p class="task-card__meta">${escapeHtml(o.descripcion)}</p>` : ''}
             <p class="task-card__meta">
@@ -484,7 +497,7 @@ async function loadMyTasks() {
 
     let tasks;
     try {
-        tasks = await apiFetch('/tasks/my');
+        [tasks] = await Promise.all([apiFetch('/tasks/my'), ensureCategoriesLoaded()]);
     } catch (err) {
         if (container) container.innerHTML = `<p class="empty-state">Error: ${escapeHtml(err.message)}</p>`;
         return;
@@ -514,8 +527,8 @@ async function loadMyTasks() {
 
         card.innerHTML = `
             <div class="task-card__row">
-                <h3 class="task-card__title">${escapeHtml(t.titulo)}</h3>
-                <span class="task-card__price">$${escapeHtml(String(t.precio ?? 0))}</span>
+                <h3 class="task-card__title">${categoryIcon(t.categoria_id)}${escapeHtml(t.titulo)}</h3>
+                <span class="task-card__price">$${formatPrice(t.precio)}</span>
             </div>
             <p class="task-card__meta">
                 <span class="chip chip--estado-${escapeHtml(t.estado)}">${escapeHtml(ESTADO_LABELS[t.estado] || t.estado)}</span>
@@ -608,7 +621,7 @@ async function loadMyOfertas() {
 
     let ofertas;
     try {
-        ofertas = await apiFetch('/tasks/ofertas/mine');
+        [ofertas] = await Promise.all([apiFetch('/tasks/ofertas/mine'), ensureCategoriesLoaded()]);
     } catch (err) {
         if (container) container.innerHTML = `<p class="empty-state">Error: ${escapeHtml(err.message)}</p>`;
         return;
@@ -637,8 +650,8 @@ async function loadMyOfertas() {
 
         card.innerHTML = `
             <div class="task-card__row">
-                <h3 class="task-card__title">${escapeHtml(o.titulo)}</h3>
-                <span class="task-card__price">$${escapeHtml(String(o.precio ?? 0))}</span>
+                <h3 class="task-card__title">${categoryIcon(o.categoria_id)}${escapeHtml(o.titulo)}</h3>
+                <span class="task-card__price">$${formatPrice(o.precio)}</span>
             </div>
             <p class="task-card__meta">
                 <span class="chip chip--estado-${escapeHtml(o.estado)}">${escapeHtml(ESTADO_LABELS[o.estado] || o.estado)}</span>
