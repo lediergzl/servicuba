@@ -9,8 +9,6 @@ services:
     name: servicios-api
     runtime: python
     buildCommand: python frontend/seo/generate_pages.py && rm -rf frontend/servicios && cp -r public-seo/servicios frontend/servicios && cp public-seo/sitemap.xml frontend/sitemap.xml && pip install -r backend/requirements.txt && alembic -c backend/alembic.ini upgrade head
-    # Render Free no dispone de preDeployCommand; las migraciones se ejecutan
-    # al final del build, antes de iniciar la aplicación.
     startCommand: uvicorn backend.app.main:app --host 0.0.0.0 --port $PORT
     envVars:
       - key: DATABASE_URL
@@ -35,4 +33,18 @@ services:
         sync: false
       - key: CLOUDINARY_API_SECRET
         sync: false
+      - key: SMTP_HOST
+        sync: false
+      - key: SMTP_PORT
+        value: 587
+      - key: SMTP_USERNAME
+        sync: false
+      - key: SMTP_PASSWORD
+        sync: false
+      - key: SMTP_FROM_EMAIL
+        sync: false
+      - key: SMTP_FROM_NAME
+        value: ServiCuba
+      - key: SMTP_USE_TLS
+        value: "true"
     plan: free
