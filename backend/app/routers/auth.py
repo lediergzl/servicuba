@@ -1,5 +1,6 @@
 from datetime import datetime, timedelta
 import re
+import secrets
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import func
@@ -10,14 +11,14 @@ from ..database import get_db
 from ..models.user import User
 from ..schemas.user import UserCreate, UserLogin, Token, UserResponse
 from ..services.auth import get_current_user
+from ..services.email import send_email
 from ..services.user_profile import build_user_response
 from ..utils.security import verify_password, get_password_hash, create_access_token
 
 router = APIRouter()
 settings = get_settings()
+CODE_TTL_MINUTES = 10
 
-# A valid bcrypt hash used only to keep unknown-phone login work comparable to
-# known-phone login. It is never accepted as a real user password.
 _DUMMY_PASSWORD_HASH = "$2b$12$5uB0rR0vLaqEVZUIny0I3er1QvPaM230ykw19FtVIKuwXKoPjnSnC"
 _LOGIN_FAILURE_LIMIT = 5
 _LOGIN_LOCK_MINUTES = 15
@@ -28,7 +29,6 @@ def normalize_phone(value: str) -> str:
 
 
 def normalized_phone_column():
-    """SQL expression compatible with PostgreSQL/MySQL for legacy phone rows."""
     value = User.telefono
     for char in (" ", ".", "-", "(", ")"):
         value = func.replace(value, char, "")
@@ -56,16 +56,20 @@ def _clear_login_failures(user: User, db: Session) -> None:
 @router.post("/register", response_model=UserResponse)
 def register(user: UserCreate, db: Session = Depends(get_db)):
     telefono = normalize_phone(user.telefono)
+    email = user.email.strip().lower()
     existing = db.query(User).filter(normalized_phone_column() == telefono).first()
     if existing:
         raise HTTPException(status_code=400, detail="Teléfono ya registrado")
+    if db.query(User).filter(func.lower(User.email) == email).first():
+        raise HTTPException(status_code=400, detail="Correo electrónico ya registrado")
 
     es_trabajador = bool(user.es_trabajador and user.categoria_id)
-    hashed = get_password_hash(user.password)
+    codigo = f"{secrets.randbelow(1_000_000):06d}"
     db_user = User(
         nombre=user.nombre,
         telefono=telefono,
-        password_hash=hashed,
+        email=email,
+        password_hash=get_password_hash(user.password),
         es_cliente=True,
         es_trabajador=es_trabajador,
         categoria_id=user.categoria_id if es_trabajador else None,
@@ -75,8 +79,21 @@ def register(user: UserCreate, db: Session = Depends(get_db)):
         lng=user.lng,
         municipio=user.municipio,
         zona=user.zona,
+        verificado=False,
+        codigo_verificacion=get_password_hash(codigo),
+        codigo_verificacion_expira=datetime.utcnow() + timedelta(minutes=CODE_TTL_MINUTES),
     )
     db.add(db_user)
+    db.flush()
+    try:
+        send_email(
+            email,
+            "Código de verificación — ServiCuba",
+            f"Hola {user.nombre},\n\nTu código de verificación de ServiCuba es: {codigo}\n\nEste código vence en {CODE_TTL_MINUTES} minutos.\n\nSi no creaste esta cuenta, ignora este mensaje.\n\nServiCuba",
+        )
+    except Exception as exc:
+        db.rollback()
+        raise HTTPException(status_code=503, detail="No se pudo enviar el correo de verificación. Intenta nuevamente.") from exc
     db.commit()
     db.refresh(db_user)
     return build_user_response(db, db_user)
@@ -85,26 +102,17 @@ def register(user: UserCreate, db: Session = Depends(get_db)):
 @router.post("/login", response_model=Token)
 def login(user: UserLogin, db: Session = Depends(get_db)):
     telefono = normalize_phone(user.telefono)
-
     db_user = db.query(User).filter(User.telefono == telefono).first()
     if not db_user:
         db_user = db.query(User).filter(normalized_phone_column() == telefono).first()
 
-    # Always perform a bcrypt verification, even for an unknown phone, to make
-    # phone enumeration through response timing materially harder.
-    password_ok = verify_password(
-        user.password,
-        db_user.password_hash if db_user else _DUMMY_PASSWORD_HASH,
-    )
-
+    password_ok = verify_password(user.password, db_user.password_hash if db_user else _DUMMY_PASSWORD_HASH)
     now = datetime.utcnow()
     if db_user and db_user.login_locked_until and db_user.login_locked_until > now:
         raise HTTPException(status_code=401, detail="Credenciales inválidas")
-
     if not db_user or not password_ok:
         _login_failure(db_user, db)
         raise HTTPException(status_code=401, detail="Credenciales inválidas")
-
     if db_user.suspendido:
         raise HTTPException(status_code=403, detail="Cuenta no disponible")
 
@@ -118,5 +126,4 @@ def login(user: UserLogin, db: Session = Depends(get_db)):
 
 @router.get("/me", response_model=UserResponse)
 def me(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    """Devuelve el usuario autenticado para restaurar la sesión del frontend."""
     return build_user_response(db, current_user)
