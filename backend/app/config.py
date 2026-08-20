@@ -19,6 +19,15 @@ class Settings(BaseSettings):
     CLOUDINARY_API_KEY: str | None = None
     CLOUDINARY_API_SECRET: str | None = None
 
+    # SMTP is used for account verification and password recovery.
+    SMTP_HOST: str | None = None
+    SMTP_PORT: int = 587
+    SMTP_USERNAME: str | None = None
+    SMTP_PASSWORD: str | None = None
+    SMTP_FROM_EMAIL: str | None = None
+    SMTP_FROM_NAME: str = "ServiCuba"
+    SMTP_USE_TLS: bool = True
+
 
 @lru_cache(maxsize=1)
 def get_settings() -> Settings:
