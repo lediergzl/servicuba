@@ -53,6 +53,11 @@ class User(Base):
     login_locked_until = Column(DateTime, nullable=True)
     login_last_failed_at = Column(DateTime, nullable=True)
 
+    # Incrementar este valor invalida inmediatamente todos los JWT emitidos
+    # anteriormente para el usuario. Se usa para logout real y futuras acciones
+    # de seguridad como cambio de contraseña o cierre global de sesiones.
+    token_version = Column(Integer, default=1, nullable=False)
+
     plan = Column(Enum(UserPlan), default=UserPlan.GRATIS, nullable=False)
     plan_expira = Column(DateTime, nullable=True)
     es_admin = Column(Boolean, default=False, nullable=False)
