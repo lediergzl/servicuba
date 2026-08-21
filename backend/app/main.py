@@ -25,11 +25,49 @@ settings = get_settings()
 logger = logging.getLogger("notificaciones")
 app = FastAPI(title="Servicios Locales API", version="1.0.0")
 app.add_middleware(GZipMiddleware, minimum_size=1000)
-app.add_middleware(CORSMiddleware, allow_origins=["https://servicuba.onrender.com"], allow_credentials=False, allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"], allow_headers=["Authorization", "Content-Type"])
+app.add_middleware(CORSMiddleware, allow_origins=["https://servicuba.onrender.com"], allow_credentials=True, allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"], allow_headers=["Authorization", "Content-Type", "X-CSRF-Token"])
+
+# Política defensiva compatible con los recursos que usa actualmente el PWA.
+# Se evita bloquear Leaflet, fuentes de Google, Cloudinary y teselas OSM.
+_SECURITY_HEADERS = {
+    "Content-Security-Policy": (
+        "default-src 'self'; "
+        "base-uri 'self'; "
+        "object-src 'none'; "
+        "frame-ancestors 'none'; "
+        "form-action 'self'; "
+        "script-src 'self' https://unpkg.com; "
+        "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://unpkg.com; "
+        "font-src 'self' https://fonts.gstatic.com data:; "
+        "img-src 'self' data: blob: https://res.cloudinary.com https://*.cloudinary.com https://*.tile.openstreetmap.org; "
+        "connect-src 'self' https://api.cloudinary.com https://res.cloudinary.com; "
+        "worker-src 'self' blob:; "
+        "manifest-src 'self'; "
+        "upgrade-insecure-requests"
+    ),
+    "X-Content-Type-Options": "nosniff",
+    "X-Frame-Options": "DENY",
+    "Referrer-Policy": "strict-origin-when-cross-origin",
+    "Permissions-Policy": "geolocation=(self), camera=(), microphone=(), payment=(), usb=()",
+    # Render sirve HTTPS; HSTS evita que el navegador vuelva a HTTP después
+    # de una primera conexión segura.
+    "Strict-Transport-Security": "max-age=31536000; includeSubDomains",
+}
+
+@app.middleware("http")
+async def security_headers(request: Request, call_next):
+    response = await call_next(request)
+    for name, value in _SECURITY_HEADERS.items():
+        response.headers.setdefault(name, value)
+    return response
+
 _RATE_WINDOWS = {"/api/auth/login": (10, 60), "/api/auth/register": (5, 300), "/api/auth/forgot-password": (3, 600), "/api/auth/reset-password": (5, 600), "/api/applications": (30, 60)}
 _rate_events = defaultdict(deque)
 
 def _client_key(request: Request) -> str:
+    forwarded = request.headers.get("x-forwarded-for")
+    if forwarded:
+        return forwarded.split(",", 1)[0].strip()
     return request.client.host if request.client else "unknown"
 
 @app.middleware("http")
@@ -46,11 +84,7 @@ async def sensitive_endpoint_rate_limit(request: Request, call_next):
                 events.popleft()
             if len(events) >= limit:
                 retry_after = max(1, int(window - (now - events[0])))
-                return JSONResponse(
-                    status_code=429,
-                    content={"detail": "Demasiadas solicitudes. Intenta nuevamente más tarde."},
-                    headers={"Retry-After": str(retry_after)},
-                )
+                return JSONResponse(status_code=429, content={"detail": "Demasiadas solicitudes. Intenta nuevamente más tarde."}, headers={"Retry-After": str(retry_after)})
             events.append(now)
     return await call_next(request)
 
@@ -85,7 +119,6 @@ for router, prefix, tags in [
 ]:
     app.include_router(router, prefix=prefix, tags=tags)
 
-
 def _database_health():
     try:
         with engine.connect() as conn:
@@ -95,31 +128,19 @@ def _database_health():
         logger.exception("Health check: database unavailable")
         return False
 
-
 @app.get("/health", tags=["Health"])
 def health():
-    """Liveness check para Render: confirma que el proceso FastAPI está vivo.
-
-    Este endpoint NO depende de PostgreSQL. Render debe usarlo para determinar
-    si el contenedor está vivo; una caída temporal/despertar lento de Neon no
-    debe provocar que Render marque el servicio como unhealthy y lo reinicie.
-    """
     return {"status": "ok"}
-
 
 @app.get("/api/health", tags=["Health"])
 def api_health():
-    """Health check de compatibilidad bajo /api, también sin dependencia de DB."""
     return {"status": "ok"}
-
 
 @app.get("/health/db", tags=["Health"])
 def health_db():
-    """Readiness check opcional que valida conectividad real con PostgreSQL."""
     if not _database_health():
         raise HTTPException(status_code=503, detail="Base de datos temporalmente no disponible")
     return {"status": "ok", "database": "ok"}
-
 
 SEO_CITIES = {"la-habana": "La Habana", "santiago-de-cuba": "Santiago de Cuba", "holguin": "Holguín", "camaguey": "Camagüey", "santa-clara": "Santa Clara"}
 SEO_SERVICES = {"electricistas": "Electricistas", "plomeros": "Plomeros", "reparadores": "Reparadores", "albaniles": "Albañiles", "pintores": "Pintores"}
@@ -138,17 +159,14 @@ def public_services_index():
 @app.get("/servicios/{service}", response_class=HTMLResponse, include_in_schema=False)
 def public_service_index(service: str):
     service_name = SEO_SERVICES.get(service.lower())
-    if not service_name:
-        raise HTTPException(status_code=404, detail="Página no encontrada")
+    if not service_name: raise HTTPException(status_code=404, detail="Página no encontrada")
     links = "".join(f'<li><a href="/servicios/{service}/{city}">{escape(service_name)} en {escape(city_name)}</a></li>' for city, city_name in SEO_CITIES.items())
     return _seo_document(f"{service_name} en Cuba | ServiCuba", f"Encuentra {service_name.lower()} por municipio en ServiCuba.", f"{SEO_BASE}/servicios/{service}", f'<h1>{escape(service_name)} en Cuba</h1><p>Busca profesionales locales por municipio.</p><ul>{links}</ul><p><a href="/servicios">Ver todos los servicios</a></p>')
 
 @app.get("/servicios/{service}/{city}", response_class=HTMLResponse, include_in_schema=False)
 def public_service_page(service: str, city: str):
-    service_name = SEO_SERVICES.get(service.lower())
-    city_name = SEO_CITIES.get(city.lower())
-    if not service_name or not city_name:
-        raise HTTPException(status_code=404, detail="Página no encontrada")
+    service_name = SEO_SERVICES.get(service.lower()); city_name = SEO_CITIES.get(city.lower())
+    if not service_name or not city_name: raise HTTPException(status_code=404, detail="Página no encontrada")
     canonical = f"{SEO_BASE}/servicios/{service}/{city}"
     city_links = "".join(f'<li><a href="/servicios/{service}/{other_city}">{escape(service_name)} en {escape(other_name)}</a></li>' for other_city, other_name in SEO_CITIES.items() if other_city != city)
     return _seo_document(f"{service_name} en {city_name} | ServiCuba", f"Encuentra servicios de {service_name.lower()} en {city_name}. ServiCuba conecta personas con trabajadores locales.", canonical, f'<h1>{escape(service_name)} en {escape(city_name)}</h1><p>Encuentra y contacta trabajadores locales para servicios de {escape(service_name.lower())} en {escape(city_name)}.</p><p>Publica lo que necesitas o explora profesionales y servicios disponibles en tu zona.</p><p><a href="/">Entrar a ServiCuba</a> · <a href="/servicios/{service}">Ver {escape(service_name.lower())} en otros municipios</a></p><h2>Otros municipios</h2><ul>{city_links}</ul>')
@@ -158,16 +176,12 @@ async def _bucle_notificaciones_pendientes():
     while True:
         await asyncio.sleep(NOTIFICACIONES_INTERVALO_SEGUNDOS)
         db = SessionLocal()
-        try:
-            procesar_notificaciones_pendientes(db)
-        except Exception:
-            logger.exception("Fallo procesando la cola de notificaciones pendientes")
-        finally:
-            db.close()
+        try: procesar_notificaciones_pendientes(db)
+        except Exception: logger.exception("Fallo procesando la cola de notificaciones pendientes")
+        finally: db.close()
 
 @app.on_event("startup")
-async def _iniciar_bucle_notificaciones():
-    asyncio.create_task(_bucle_notificaciones_pendientes())
+async def _iniciar_bucle_notificaciones(): asyncio.create_task(_bucle_notificaciones_pendientes())
 
 FRONTEND_DIR = Path(__file__).resolve().parent.parent.parent / "frontend"
 @app.get("/sitemap.xml", include_in_schema=False)
@@ -178,5 +192,4 @@ def public_sitemap():
     xml = '<?xml version="1.0" encoding="UTF-8"?><urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">' + "".join(f'<url><loc>{u}</loc><changefreq>weekly</changefreq><priority>{"1.0" if u == SEO_BASE + "/" else "0.8" if u.endswith("/servicios") else "0.7"}</priority></url>' for u in urls) + "</urlset>"
     return HTMLResponse(content=xml, media_type="application/xml")
 
-if FRONTEND_DIR.is_dir():
-    app.mount("/", StaticFiles(directory=FRONTEND_DIR, html=True), name="frontend")
+if FRONTEND_DIR.is_dir(): app.mount("/", StaticFiles(directory=FRONTEND_DIR, html=True), name="frontend")
