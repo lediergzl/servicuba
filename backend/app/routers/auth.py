@@ -4,6 +4,7 @@ import re
 import secrets
 
 from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
@@ -26,8 +27,21 @@ _LOGIN_FAILURE_LIMIT = 5
 _LOGIN_LOCK_MINUTES = 15
 
 
+class EmailVerificationRequest(BaseModel):
+    email: str
+    codigo: str
+
+
+class ResendVerificationRequest(BaseModel):
+    email: str
+
+
 def normalize_phone(value: str) -> str:
     return re.sub(r"[\s().-]", "", value or "")
+
+
+def normalize_email(value: str) -> str:
+    return (value or "").strip().lower()
 
 
 def normalized_phone_column():
@@ -55,10 +69,22 @@ def _clear_login_failures(user: User, db: Session) -> None:
         db.commit()
 
 
+def _new_verification_code() -> str:
+    return f"{secrets.randbelow(1_000_000):06d}"
+
+
+def _send_verification_email(user: User, codigo: str) -> None:
+    send_email(
+        user.email,
+        "Código de verificación — ServiCuba",
+        f"Hola {user.nombre},\n\nTu código de verificación de ServiCuba es: {codigo}\n\nEste código vence en {CODE_TTL_MINUTES} minutos.\n\nSi no creaste esta cuenta, ignora este mensaje.\n\nServiCuba",
+    )
+
+
 @router.post("/register", response_model=UserResponse)
 def register(user: UserCreate, db: Session = Depends(get_db)):
     telefono = normalize_phone(user.telefono)
-    email = user.email.strip().lower()
+    email = normalize_email(user.email)
     existing = db.query(User).filter(normalized_phone_column() == telefono).first()
     if existing:
         raise HTTPException(status_code=400, detail="Teléfono ya registrado")
@@ -66,7 +92,7 @@ def register(user: UserCreate, db: Session = Depends(get_db)):
         raise HTTPException(status_code=400, detail="Correo electrónico ya registrado")
 
     es_trabajador = bool(user.es_trabajador and user.categoria_id)
-    codigo = f"{secrets.randbelow(1_000_000):06d}"
+    codigo = _new_verification_code()
     db_user = User(
         nombre=user.nombre,
         telefono=telefono,
@@ -88,11 +114,7 @@ def register(user: UserCreate, db: Session = Depends(get_db)):
     db.add(db_user)
     db.flush()
     try:
-        send_email(
-            email,
-            "Código de verificación — ServiCuba",
-            f"Hola {user.nombre},\n\nTu código de verificación de ServiCuba es: {codigo}\n\nEste código vence en {CODE_TTL_MINUTES} minutos.\n\nSi no creaste esta cuenta, ignora este mensaje.\n\nServiCuba",
-        )
+        _send_verification_email(db_user, codigo)
     except Exception:
         db.rollback()
         logger.exception("Registration verification email failed for domain=%s", email.rsplit("@", 1)[-1])
@@ -100,6 +122,54 @@ def register(user: UserCreate, db: Session = Depends(get_db)):
     db.commit()
     db.refresh(db_user)
     return build_user_response(db, db_user)
+
+
+@router.post("/verify-email")
+def verify_email(payload: EmailVerificationRequest, db: Session = Depends(get_db)):
+    """Verify a newly registered account using the 6-digit code sent by email."""
+    email = normalize_email(payload.email)
+    codigo = (payload.codigo or "").strip()
+    user = db.query(User).filter(func.lower(User.email) == email).first()
+    if not user:
+        raise HTTPException(status_code=400, detail="Código o correo incorrecto")
+    if user.verificado:
+        return {"message": "Esta cuenta ya está verificada", "verified": True}
+    if not user.codigo_verificacion or not user.codigo_verificacion_expira:
+        raise HTTPException(status_code=400, detail="No hay un código de verificación activo. Solicita uno nuevo.")
+    if user.codigo_verificacion_expira < datetime.utcnow():
+        raise HTTPException(status_code=400, detail="El código expiró. Solicita uno nuevo.")
+    if not verify_password(codigo, user.codigo_verificacion):
+        raise HTTPException(status_code=400, detail="Código incorrecto")
+
+    user.verificado = True
+    user.codigo_verificacion = None
+    user.codigo_verificacion_expira = None
+    db.commit()
+    return {"message": "Correo verificado correctamente", "verified": True}
+
+
+@router.post("/resend-verification")
+def resend_verification(payload: ResendVerificationRequest, db: Session = Depends(get_db)):
+    """Generate and send a new email verification code for an unverified account."""
+    email = normalize_email(payload.email)
+    user = db.query(User).filter(func.lower(User.email) == email).first()
+    if not user:
+        # Do not disclose whether an account exists.
+        return {"message": "Si existe una cuenta pendiente, enviamos un nuevo código.", "expira_en_minutos": CODE_TTL_MINUTES}
+    if user.verificado:
+        return {"message": "La cuenta ya está verificada.", "verified": True}
+
+    codigo = _new_verification_code()
+    user.codigo_verificacion = get_password_hash(codigo)
+    user.codigo_verificacion_expira = datetime.utcnow() + timedelta(minutes=CODE_TTL_MINUTES)
+    try:
+        _send_verification_email(user, codigo)
+        db.commit()
+    except Exception:
+        db.rollback()
+        logger.exception("Verification resend failed for domain=%s", email.rsplit("@", 1)[-1])
+        raise HTTPException(status_code=503, detail="No se pudo enviar el correo de verificación. Intenta nuevamente.")
+    return {"message": "Enviamos un nuevo código a tu correo.", "expira_en_minutos": CODE_TTL_MINUTES}
 
 
 @router.post("/login", response_model=Token)
