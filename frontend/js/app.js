@@ -65,8 +65,8 @@ function installHeaderResponsiveNav() {
     menuBtn.addEventListener('click', () => { if (navigationBusy) return; const open = mobileMenu.classList.toggle('is-open'); menuBtn.setAttribute('aria-expanded', String(open)); });
 }
 
-function setGuestUi() { document.getElementById('user-menu-guest')?.classList.remove('hidden'); document.getElementById('user-menu-auth')?.classList.add('hidden'); document.getElementById('bottomNav')?.classList.add('hidden'); document.getElementById('modoSwitch')?.classList.add('hidden'); syncModeSwitch('cliente'); }
-function setAuthUi() { document.getElementById('user-menu-guest')?.classList.add('hidden'); document.getElementById('user-menu-auth')?.classList.remove('hidden'); document.getElementById('bottomNav')?.classList.remove('hidden'); document.getElementById('modoSwitch')?.classList.remove('hidden'); }
+function setGuestUi() { document.getElementById('user-menu-guest')?.classList.remove('hidden'); document.getElementById('user-menu-auth')?.classList.add('hidden'); document.getElementById('bottomNav')?.classList.add('hidden'); document.getElementById('modoSwitch')?.classList.add('hidden'); document.body.classList.remove('is-authenticated'); syncModeSwitch('cliente'); }
+function setAuthUi() { document.getElementById('user-menu-guest')?.classList.add('hidden'); document.getElementById('user-menu-auth')?.classList.remove('hidden'); document.getElementById('bottomNav')?.classList.remove('hidden'); document.getElementById('modoSwitch')?.classList.remove('hidden'); document.body.classList.add('is-authenticated'); }
 
 async function renderWorkerActivationForm(profile = {}) {
     const container = document.getElementById('workerActivationSection'); if (!container || profile.es_trabajador) { if (container) container.innerHTML = ''; return; }

@@ -17,11 +17,18 @@
 @media (min-width: 761px) {
   .app-shell { max-width: 1100px; }
   .app-main { width: 100%; max-width: 520px; margin-inline: auto; padding-bottom: 92px; }
-  .bottom-nav { display: flex !important; }
-  /* Excepción: en la landing pública el layout es de ancho completo y
-     bottom-nav (pensado para la columna angosta de 520px del dashboard)
-     queda flotando como una caja fuera de lugar. Se oculta solo ahí. */
-  body:has(#landing:not(.hidden)) .bottom-nav { display: none !important; }
+  /* IMPORTANTE: antes esta regla forzaba display:flex!important en TODO
+     ancho de escritorio, con una única excepción para #landing (ver
+     comentario histórico más abajo). Eso dejaba la barra inferior
+     visible — con "Inicio/Mensajes/Perfil" — en CUALQUIER otra vista de
+     invitado sin sesión (login, register, etc.), ya que .hidden ya no
+     podía ganarle a este !important. La visibilidad de bottom-nav en
+     escritorio ahora depende del estado real de autenticación
+     (body.is-authenticated, alternado en setGuestUi/setAuthUi de
+     app.js) en vez de intentar listar cada vista de invitado una por
+     una — así cualquier vista nueva sin sesión queda cubierta por
+     defecto sin tener que acordarse de añadir una excepción más. */
+  body.is-authenticated .bottom-nav { display: flex !important; }
 }
 @media (max-width: 760px) {
   .app-header { position: sticky; }
