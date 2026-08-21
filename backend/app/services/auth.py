@@ -1,3 +1,4 @@
+import secrets
 from fastapi import Depends, HTTPException, Request
 from fastapi.security import OAuth2PasswordBearer
 from sqlalchemy.orm import Session
@@ -11,6 +12,16 @@ oauth2_scheme_optional = OAuth2PasswordBearer(tokenUrl="/api/auth/login", auto_e
 
 def _token_from_request(request: Request, header_token: str | None) -> str | None:
     return request.cookies.get("servicuba_access") or header_token
+
+
+def _check_csrf(request: Request) -> None:
+    if request.method in {"GET", "HEAD", "OPTIONS"}:
+        return
+    if request.cookies.get("servicuba_access"):
+        cookie_token = request.cookies.get("servicuba_csrf")
+        header_token = request.headers.get("X-CSRF-Token")
+        if not cookie_token or not header_token or not secrets.compare_digest(cookie_token, header_token):
+            raise HTTPException(status_code=403, detail="Validación CSRF requerida")
 
 
 def _user_from_token(token: str | None, db: Session) -> User:
@@ -30,23 +41,21 @@ def _user_from_token(token: str | None, db: Session) -> User:
     return user
 
 
-def get_current_user(
-    request: Request,
-    token: str | None = Depends(oauth2_scheme),
-    db: Session = Depends(get_db),
-):
+def get_current_user(request: Request, token: str | None = Depends(oauth2_scheme), db: Session = Depends(get_db)):
+    _check_csrf(request)
     return _user_from_token(_token_from_request(request, token), db)
 
 
-def get_optional_current_user(
-    request: Request,
-    token: str | None = Depends(oauth2_scheme_optional),
-    db: Session = Depends(get_db),
-):
+def get_optional_current_user(request: Request, token: str | None = Depends(oauth2_scheme_optional), db: Session = Depends(get_db)):
     effective_token = _token_from_request(request, token)
     if not effective_token:
         return None
+    _check_csrf(request)
     return _user_from_token(effective_token, db)
+
+
+def require_csrf(request: Request):
+    _check_csrf(request)
 
 
 def get_current_admin(current_user: User = Depends(get_current_user)):
