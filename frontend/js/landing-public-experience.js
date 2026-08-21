@@ -1,4 +1,4 @@
-import { apiFetch, escapeHtml } from './core.js';
+import { apiFetch, escapeHtml, notify, showConfirm } from './core.js';
 import { showLogin } from './auth.js';
 
 const STYLE_ID = 'servicuba-public-landing-experience';
@@ -47,8 +47,52 @@ function wireProductDirectoryButton(){
     btn.addEventListener('click',()=>openMunicipioDirectory(btn.dataset.directoryType||'oferta'));
 }
 
+function directoryWorkerCard(item, municipio, authenticated){
+ // El backend (GET /discovery/directory) devuelve trabajadores, no
+ // tareas: los campos reales son nombre/categoria_nombre/
+ // descripcion_trabajador, no titulo/descripcion. Usar los nombres
+ // equivocados dejaba el título vacío y la descripción siempre en el
+ // texto genérico de respaldo.
+ return `<article class="task-card" data-worker-id="${escapeHtml(String(item.id))}">
+    <div class="task-card__row">
+        <h3 class="task-card__title">${item.premium?'⭐ ':''}${escapeHtml(item.nombre||'Trabajador')}</h3>
+    </div>
+    <p class="task-card__meta">${escapeHtml(item.municipio||municipio)} · ${escapeHtml(item.categoria_nombre||'Servicio')}${item.verificado?' · ✓ Verificado':''}</p>
+    <p class="task-card__description">${escapeHtml(item.descripcion_trabajador||'Consulta los detalles al contactar.')}</p>
+    <button type="button" class="btn btn-primary btn-block" ${authenticated?'data-public-view':'data-public-login'}>
+        ${authenticated?'Ver perfil y contactar':'Crear cuenta para contactar'}
+    </button>
+ </article>`;
+}
+
+async function showPublicWorkerProfile(workerId){
+ try{
+    const w=await apiFetch(`/users/public/${encodeURIComponent(workerId)}`);
+    const details=[
+        w.categoria_nombre?`${w.categoria_icono||'🛠'} ${w.categoria_nombre}`:null,
+        w.descripcion_trabajador||'Sin descripción profesional.',
+        w.precio_hora!=null?`💰 ${w.precio_hora} CUP/h`:null,
+        w.municipio?`📍 ${w.municipio}${w.zona?` · ${w.zona}`:''}`:null,
+    ].filter(Boolean).join('\n\n');
+    await showConfirm({title:w.nombre||'Perfil del trabajador',message:details,confirmLabel:'Cerrar',cancelLabel:'Cerrar'});
+ }catch(err){
+    notify(err?.message||'No se pudo cargar el perfil del trabajador.','error');
+ }
+}
+
 async function openMunicipioDirectory(defaultType='oferta'){
- const overlay=document.createElement('div');overlay.className='modal-overlay landing-public-directory';const modal=document.createElement('div');modal.className='modal-card';modal.innerHTML='<h2 class="modal-title">Explorar sin GPS</h2><p class="modal-message">Elige un municipio para ver servicios o tareas públicas. No necesitamos tu ubicación ni tu cuenta.</p><p class="landing-public-directory__hint">Municipio</p><input id="publicMunicipioInput" class="field-input" placeholder="Ej: Plaza, Playa, Centro Habana…"><select id="publicMunicipioTipo" class="field-input mt-sm"><option value="oferta">Servicios ofrecidos</option><option value="necesidad">Tareas publicadas</option></select><div id="publicMunicipioResults" class="stack-sm mt-md"></div><div class="modal-actions"><button type="button" class="btn btn-ghost" id="publicMunicipioClose">Cerrar</button></div>';overlay.appendChild(modal);document.body.appendChild(overlay);const input=modal.querySelector('#publicMunicipioInput'),tipo=modal.querySelector('#publicMunicipioTipo'),results=modal.querySelector('#publicMunicipioResults'),close=()=>overlay.remove();tipo.value=defaultType==='necesidad'?'necesidad':'oferta';modal.querySelector('#publicMunicipioClose').addEventListener('click',close);overlay.addEventListener('click',e=>{if(e.target===overlay)close()});let timer=null;const load=async()=>{const municipio=input.value.trim();if(municipio.length<2){results.innerHTML='<p class="empty-state">Escribe al menos 2 letras del municipio.</p>';return}results.innerHTML='<p class="empty-state">Buscando opciones públicas…</p>';try{const data=await apiFetch(`/discovery/directory?municipio=${encodeURIComponent(municipio)}&tipo=${encodeURIComponent(tipo.value)}`);const items=Array.isArray(data)?data:[];if(!items.length){results.innerHTML='<p class="empty-state">No encontramos publicaciones públicas en ese municipio todavía.</p>';return}results.innerHTML=items.slice(0,20).map(item=>`<article class="task-card"><div class="task-card__row"><h3 class="task-card__title">${item.destacada?'★ ':''}${escapeHtml(item.titulo)}</h3></div><p class="task-card__meta">${escapeHtml(item.municipio||municipio)} · ${escapeHtml(item.categoria_nombre||'Servicio')}</p><p class="task-card__description">${escapeHtml(item.descripcion||'Consulta los detalles al contactar.')}</p><button type="button" class="btn btn-primary btn-block" data-public-login>Crear cuenta para contactar</button></article>`).join('')}catch(err){results.innerHTML=`<p class="empty-state">No pudimos cargar el directorio ahora. ${escapeHtml(err.message||'')}</p>`}};input.addEventListener('input',()=>{clearTimeout(timer);timer=setTimeout(load,350)});tipo.addEventListener('change',load);results.addEventListener('click',e=>{if(!e.target.closest('[data-public-login]'))return;close();showLogin()});input.focus();
+ const overlay=document.createElement('div');overlay.className='modal-overlay landing-public-directory';const modal=document.createElement('div');modal.className='modal-card';modal.innerHTML='<h2 class="modal-title">Explorar sin GPS</h2><p class="modal-message">Elige un municipio para ver servicios o tareas públicas. No necesitamos tu ubicación ni tu cuenta.</p><p class="landing-public-directory__hint">Municipio</p><input id="publicMunicipioInput" class="field-input" placeholder="Ej: Plaza, Playa, Centro Habana…"><select id="publicMunicipioTipo" class="field-input mt-sm"><option value="oferta">Servicios ofrecidos</option><option value="necesidad">Tareas publicadas</option></select><div id="publicMunicipioResults" class="stack-sm mt-md"></div><div class="modal-actions"><button type="button" class="btn btn-ghost" id="publicMunicipioClose">Cerrar</button></div>';overlay.appendChild(modal);document.body.appendChild(overlay);const input=modal.querySelector('#publicMunicipioInput'),tipo=modal.querySelector('#publicMunicipioTipo'),results=modal.querySelector('#publicMunicipioResults'),close=()=>overlay.remove();tipo.value=defaultType==='necesidad'?'necesidad':'oferta';modal.querySelector('#publicMunicipioClose').addEventListener('click',close);overlay.addEventListener('click',e=>{if(e.target===overlay)close()});
+ // Si ya hay una sesión válida, el objetivo de este modal (explorar SIN
+ // registrarte) ya no aplica para "contactar": en vez de mandar siempre
+ // a crear cuenta, se abre el perfil real del trabajador.
+ const authenticated=!!localStorage.getItem('token');
+ let timer=null;const load=async()=>{const municipio=input.value.trim();if(municipio.length<2){results.innerHTML='<p class="empty-state">Escribe al menos 2 letras del municipio.</p>';return}results.innerHTML='<p class="empty-state">Buscando opciones públicas…</p>';try{const data=await apiFetch(`/discovery/directory?municipio=${encodeURIComponent(municipio)}&tipo=${encodeURIComponent(tipo.value)}`);const items=Array.isArray(data)?data:[];if(!items.length){results.innerHTML='<p class="empty-state">No encontramos publicaciones públicas en ese municipio todavía.</p>';return}results.innerHTML=items.slice(0,20).map(item=>directoryWorkerCard(item,municipio,authenticated)).join('')}catch(err){results.innerHTML=`<p class="empty-state">No pudimos cargar el directorio ahora. ${escapeHtml(err.message||'')}</p>`}};input.addEventListener('input',()=>{clearTimeout(timer);timer=setTimeout(load,350)});tipo.addEventListener('change',load);
+ results.addEventListener('click',async e=>{
+    const card=e.target.closest('[data-worker-id]');if(!card)return;
+    if(e.target.closest('[data-public-login]')){close();showLogin();return;}
+    if(e.target.closest('[data-public-view]')){await showPublicWorkerProfile(card.dataset.workerId);}
+ });
+ input.focus();
 }
 
 export function initLandingPublicExperience(){injectStyles();ensurePublicChrome();consolidateHeadline();injectExploreLink();wireProductDirectoryButton()}
