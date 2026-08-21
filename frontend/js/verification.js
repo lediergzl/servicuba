@@ -25,6 +25,23 @@ async function verifyCode(email, codigo) {
     });
 }
 
+async function promptForCode(email) {
+    return showFormModal({
+        title: 'Verifica tu correo',
+        confirmLabel: 'Verificar cuenta',
+        fields: [{
+            name: 'codigo',
+            label: `Código de 6 dígitos enviado a ${email}`,
+            type: 'text',
+            inputmode: 'numeric',
+            required: true,
+            placeholder: '123456',
+            maxlength: 6,
+            autocomplete: 'one-time-code'
+        }]
+    });
+}
+
 export async function refreshVerificationBanner() {
     const banner = document.getElementById('verificationBanner');
     if (!banner) return;
@@ -53,7 +70,7 @@ export function initVerification() {
     btn.addEventListener('click', async () => {
         const originalText = btn.textContent;
         btn.disabled = true;
-        btn.textContent = 'Enviando código…';
+        btn.textContent = 'Verificar…';
 
         try {
             const profile = await apiFetch('/users/profile');
@@ -63,37 +80,56 @@ export function initVerification() {
                 return;
             }
 
-            // Usa exactamente el mismo mecanismo que el registro.
-            // El código nunca se devuelve ni se muestra en la interfaz.
-            const resp = await sendVerificationCode(email);
-            notify(resp?.message || 'Hemos enviado un nuevo código a tu correo.', 'info');
-
-            const result = await showFormModal({
-                title: 'Verifica tu correo',
-                confirmLabel: 'Verificar cuenta',
-                fields: [{
-                    name: 'codigo',
-                    label: `Código de 6 dígitos enviado a ${email} (válido ${resp?.expira_en_minutos || 10} min)`,
-                    type: 'text',
-                    inputmode: 'numeric',
-                    required: true,
-                    placeholder: '123456',
-                    maxlength: 6
-                }]
-            });
+            // IMPORTANTE: no reenviamos automáticamente aquí. Si el usuario
+            // ya recibió el código durante el registro, ese código sigue siendo
+            // válido. Generar otro código antes de pedirlo invalidaría el
+            // anterior y provocaría falsos "Código incorrecto".
+            let result = await promptForCode(email);
             if (result === null) return;
 
-            const codigo = String(result.codigo || '').trim();
+            let codigo = String(result.codigo || '').trim();
             if (!/^\d{6}$/.test(codigo)) {
                 notify('El código debe tener exactamente 6 dígitos.', 'error');
                 return;
             }
 
-            await verifyCode(email, codigo);
-            notify('¡Cuenta verificada correctamente!', 'success');
-            banner?.classList.add('hidden');
+            try {
+                await verifyCode(email, codigo);
+                notify('¡Cuenta verificada correctamente!', 'success');
+                banner?.classList.add('hidden');
+                return;
+            } catch (err) {
+                // Si el código anterior expiró o fue invalidado, ofrecemos
+                // explícitamente generar uno nuevo. No se genera silenciosamente.
+                const retry = await showFormModal({
+                    title: 'Código no válido o expirado',
+                    confirmLabel: 'Enviar nuevo código',
+                    fields: [{
+                        name: 'confirmar',
+                        label: `Enviar un nuevo código a ${email}. El código anterior dejará de ser válido.`,
+                        type: 'checkbox',
+                        required: true
+                    }]
+                });
+                if (retry === null) return;
+
+                const sent = await sendVerificationCode(email);
+                notify(sent?.message || 'Nuevo código enviado. Revisa tu correo.', 'info');
+
+                result = await promptForCode(email);
+                if (result === null) return;
+                codigo = String(result.codigo || '').trim();
+                if (!/^\d{6}$/.test(codigo)) {
+                    notify('El código debe tener exactamente 6 dígitos.', 'error');
+                    return;
+                }
+
+                await verifyCode(email, codigo);
+                notify('¡Cuenta verificada correctamente!', 'success');
+                banner?.classList.add('hidden');
+            }
         } catch (err) {
-            notify(err?.message || 'El código es incorrecto o expiró.', 'error');
+            notify(err?.message || 'No se pudo verificar la cuenta. Inténtalo nuevamente.', 'error');
         } finally {
             btn.disabled = false;
             btn.textContent = originalText;
