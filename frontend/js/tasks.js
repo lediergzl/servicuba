@@ -173,11 +173,6 @@ export async function loadNearbyTasks() {
         return;
     }
 
-    // El banner de anuncios se carga en paralelo, sin bloquear la lista de
-    // tareas: un anuncio patrocinado nunca debe hacer esperar el contenido
-    // principal ni bloquear la carga si el endpoint falla.
-    loadAdBanner('adBannerTrabajador', category || null).catch(() => {});
-
     const params = new URLSearchParams({ lat, lng, radius_km: radius });
     if (category) params.set('category_id', category);
 
@@ -307,8 +302,6 @@ export async function loadNearbyOfertas() {
     if (nearbyOfertasAbortController && nearbyOfertasInFlightParams === paramsKey) {
         return;
     }
-
-    loadAdBanner('adBannerCliente', category || null).catch(() => {});
 
     const params = new URLSearchParams({ lat, lng, radius_km: radius });
     if (category) params.set('category_id', category);
@@ -462,6 +455,13 @@ export function showDashboardCliente() {
     document.getElementById('misTareasPanel')?.classList.remove('hidden');
     document.getElementById('ofertasCercanasPanel')?.classList.add('hidden');
     loadMyTasks();
+    // El banner de anuncios ahora vive FUERA de las sub-pestañas (ver
+    // index.html: #adBannerCliente ya no está dentro de
+    // #ofertasCercanasPanel), así que se carga una sola vez al entrar al
+    // dashboard, sin importar cuál sub-pestaña esté activa — antes sólo
+    // se pedía dentro de loadNearbyOfertas(), por lo que quedaba oculto
+    // mientras el usuario estaba en "Mis tareas".
+    loadAdBanner('adBannerCliente').catch(() => {});
 }
 
 export function showDashboardTrabajador() {
@@ -474,6 +474,9 @@ export function showDashboardTrabajador() {
     document.getElementById('tareasCercanasPanel')?.classList.remove('hidden');
     document.getElementById('misOfertasPanel')?.classList.add('hidden');
     loadNearbyTasks();
+    // Mismo motivo que en showDashboardCliente(): el banner ya no vive
+    // dentro de #tareasCercanasPanel, así que se carga acá una sola vez.
+    loadAdBanner('adBannerTrabajador').catch(() => {});
 }
 
 // Sub-pestañas dentro de cada dashboard — NO reutilizan la clase
