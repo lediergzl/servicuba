@@ -48,9 +48,19 @@ def get_active_ad(category_id: int | None = None, excluir: str | None = None, db
     excluded = {x.strip() for x in excluir.split(",")} if excluir else set(); excluded.discard("")
     ad = None
     if category_id is not None:
+        # Preferimos un anuncio dirigido a la categoría que el usuario está
+        # mirando ahora mismo (más relevante), pero eso es sólo una
+        # preferencia, no un requisito.
         ad = _elegir_sin_repetir(q.filter(Ad.categoria_id == category_id).all(), excluded)
     if ad is None:
-        ad = _elegir_sin_repetir(q.filter(Ad.categoria_id.is_(None)).all(), excluded)
+        # Un anuncio pagado debe tener visibilidad real: antes, si no
+        # coincidía exactamente la categoría filtrada, sólo se mostraban
+        # los anuncios SIN categoría asignada (categoria_id IS NULL). Eso
+        # dejaba a cualquier anuncio dirigido a un oficio específico sin
+        # aparecer nunca fuera de esa categoría exacta — incluyendo la
+        # vista "Todas", donde antes no se mostraba ningún anuncio con
+        # categoría. Ahora cualquier anuncio activo cuenta como candidato.
+        ad = _elegir_sin_repetir(q.all(), excluded)
     if ad is None: return None
     ad.impresiones += 1; db.commit(); db.refresh(ad); return ad
 
