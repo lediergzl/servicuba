@@ -8,6 +8,14 @@ import { initVerification, refreshVerificationBanner } from './verification.js';
 import { initSponsorAdEntry } from './monetization.js';
 import { initLandingSearch } from './landing.js';
 import { initDirectory, openMunicipioDirectory } from './directory.js';
+// Activa el panel oscuro "ServiCuba activo" (estilos + saludo real + KPIs +
+// actividad reciente). Sin este import, dashboard-live-sync.js — y todo lo
+// que encadena (dashboard-visual-polish.js, dashboard-card-ux.js,
+// dashboard-presence.js, dashboard-messaging-sync.js,
+// dashboard-action-feedback.js) — nunca se ejecuta, y la tarjeta queda con
+// el HTML crudo de index.html: sin CSS y sin datos reales (saludo, reloj,
+// KPIs). Ver comentario histórico de este bug en la conversación de soporte.
+import './dashboard-live-sync.js';
 
 let activeMode = 'cliente';
 let navigationBusy = false;
