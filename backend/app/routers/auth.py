@@ -1,4 +1,5 @@
 from datetime import datetime, timedelta
+import logging
 import re
 import secrets
 
@@ -17,6 +18,7 @@ from ..utils.security import verify_password, get_password_hash, create_access_t
 
 router = APIRouter()
 settings = get_settings()
+logger = logging.getLogger(__name__)
 CODE_TTL_MINUTES = 10
 
 _DUMMY_PASSWORD_HASH = "$2b$12$5uB0rR0vLaqEVZUIny0I3er1QvPaM230ykw19FtVIKuwXKoPjnSnC"
@@ -91,9 +93,10 @@ def register(user: UserCreate, db: Session = Depends(get_db)):
             "Código de verificación — ServiCuba",
             f"Hola {user.nombre},\n\nTu código de verificación de ServiCuba es: {codigo}\n\nEste código vence en {CODE_TTL_MINUTES} minutos.\n\nSi no creaste esta cuenta, ignora este mensaje.\n\nServiCuba",
         )
-    except Exception as exc:
+    except Exception:
         db.rollback()
-        raise HTTPException(status_code=503, detail="No se pudo enviar el correo de verificación. Intenta nuevamente.") from exc
+        logger.exception("Registration verification email failed for domain=%s", email.rsplit("@", 1)[-1])
+        raise HTTPException(status_code=503, detail="No se pudo enviar el correo de verificación. Revisa la configuración del servicio de correo e intenta nuevamente.")
     db.commit()
     db.refresh(db_user)
     return build_user_response(db, db_user)
