@@ -3,10 +3,10 @@ import { switchView } from './tasks.js';
 import { initLandingPublicExperience } from './landing-public-experience.js';
 export let currentUser=null;
 
-// Compatibilidad temporal con módulos heredados: este valor NO es un JWT ni una
-// credencial. La autorización real depende exclusivamente de la cookie HttpOnly.
-const markSession=()=>localStorage.setItem('servicuba_session','1');
-const clearSession=()=>localStorage.removeItem('servicuba_session');
+// Compatibilidad temporal con caché/módulos heredados. Es un marcador fijo,
+// nunca un JWT. El wrapper elimina cualquier Authorization sintético antes de enviar.
+const markSession=()=>{localStorage.setItem('servicuba_session','1');localStorage.setItem('token','servicuba-session');};
+const clearSession=()=>{localStorage.removeItem('servicuba_session');localStorage.removeItem('token');};
 (function(){if(window.__servicubaSecureFetch)return;const native=window.fetch.bind(window);window.fetch=async(input,init={})=>{const url=typeof input==='string'?input:input?.url||'';const api=url.startsWith('/api/')||url.startsWith(window.location.origin+'/api/');if(!api)return native(input,init);const method=String(init.method||'GET').toUpperCase(),headers=new Headers(init.headers);const csrf=document.cookie.match(/(?:^|; )servicuba_csrf=([^;]+)/);if(!['GET','HEAD','OPTIONS'].includes(method)&&csrf&&!headers.has('X-CSRF-Token'))headers.set('X-CSRF-Token',decodeURIComponent(csrf[1]));const auth=headers.get('Authorization');if(auth==='Bearer cookie-session'||auth==='Bearer servicuba-session')headers.delete('Authorization');return native(input,{...init,headers,credentials:'include'});};window.__servicubaSecureFetch=true;})();
 const phone=v=>String(v||'').replace(/[\s().-]/g,'');const email=v=>String(v||'').trim().toLowerCase();const validEmail=v=>/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email(v));
 function ensureEmail(){const f=document.getElementById('registerForm');if(!f||document.getElementById('regEmail'))return;const i=document.createElement('input');i.type='email';i.id='regEmail';i.className='field-input';i.placeholder='Correo electrónico';i.required=true;document.getElementById('regTelefono')?.insertAdjacentElement('afterend',i);}
