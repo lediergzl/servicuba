@@ -19,7 +19,10 @@ class Settings(BaseSettings):
     CLOUDINARY_API_KEY: str | None = None
     CLOUDINARY_API_SECRET: str | None = None
 
-    # SMTP is used for account verification and password recovery.
+    # Brevo HTTP API is preferred on Render because outbound SMTP can time out.
+    BREVO_API_KEY: str | None = None
+
+    # SMTP remains as a fallback for local/other deployments.
     SMTP_HOST: str | None = None
     SMTP_PORT: int = 587
     SMTP_USERNAME: str | None = None
