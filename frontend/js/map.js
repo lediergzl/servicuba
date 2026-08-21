@@ -1,5 +1,7 @@
 import { apiFetch, notify } from './core.js';
 import { getLocationWithFallback } from './location.js';
+import { loadNearbyTasks, loadNearbyOfertas } from './tasks.js';
+import { showLogin } from './auth.js';
 
 let map = null;
 let marker = null;
@@ -71,6 +73,62 @@ function getMapFilters() {
     };
 }
 
+function escapeHtmlLocal(str) {
+    const div = document.createElement('div');
+    div.textContent = str ?? '';
+    return div.innerHTML;
+}
+
+async function executeMapAction(itemId, tipo) {
+    if (!localStorage.getItem('token')) {
+        showLogin();
+        return;
+    }
+
+    const button = document.querySelector(`#listaTareas button[data-id="${CSS.escape(String(itemId))}"]`);
+    if (button && !button.disabled) {
+        button.click();
+        return;
+    }
+
+    // El popup y la lista usan el mismo endpoint/filtros. Recargamos la lista
+    // correspondiente y pulsamos su acción real, evitando duplicar el flujo
+    // de postulación/solicitud (modal, API, estado local y mensajes).
+    try {
+        if (tipo === 'oferta') await loadNearbyOfertas();
+        else await loadNearbyTasks();
+
+        const listId = tipo === 'oferta' ? 'listaOfertasCercanas' : 'listaTareas';
+        const actionButton = document.querySelector(`#${listId} button[data-id="${CSS.escape(String(itemId))}"]`);
+        if (!actionButton) {
+            notify('Esta publicación ya no está disponible en la lista actual.', 'info');
+            return;
+        }
+        if (actionButton.disabled) {
+            notify('Ya realizaste una solicitud para esta publicación.', 'info');
+            return;
+        }
+        actionButton.click();
+    } catch (err) {
+        notify(`No se pudo abrir la acción: ${err.message}`, 'error');
+    }
+}
+
+function attachPopupAction(markerItem, item, authenticated, mode) {
+    markerItem.on('popupopen', () => {
+        const popup = markerItem.getPopup()?.getElement();
+        const action = popup?.querySelector('[data-map-action]');
+        if (!action || action.dataset.bound) return;
+        action.dataset.bound = 'true';
+        action.addEventListener('click', () => {
+            action.disabled = true;
+            action.textContent = authenticated ? (mode === 'trabajador' ? 'Abriendo…' : 'Abriendo…') : 'Abriendo…';
+            Promise.resolve(executeMapAction(item.id, mode === 'trabajador' ? 'necesidad' : 'oferta'))
+                .finally(() => { action.disabled = false; action.textContent = authenticated ? (mode === 'trabajador' ? 'Postular' : 'Solicitar') : 'Iniciar sesión'; });
+        });
+    });
+}
+
 async function loadMapItems(lat, lng) {
     if (mapRequestController) mapRequestController.abort();
     mapRequestController = new AbortController();
@@ -97,9 +155,11 @@ async function loadMapItems(lat, lng) {
             const title = item.titulo || item.titulo_oferta || item.categoria_nombre || 'Servicio disponible';
             const price = item.precio ?? item.precio_hora ?? 0;
             const distance = item.distancia_km ?? '';
+            const actionLabel = authenticated ? (mode === 'trabajador' ? 'Postular' : 'Solicitar') : 'Iniciar sesión';
             const markerItem = window.L.marker([itemLat, itemLng], { icon }).addTo(map).bindPopup(
-                `<strong>${item.destacada ? '★ ' : ''}${escapeHtmlLocal(title)}</strong><br>$${escapeHtmlLocal(String(price))} · ${escapeHtmlLocal(String(distance))} km${!authenticated ? '<br><small>Ubicación aproximada · inicia sesión para contactar</small>' : ''}`
+                `<div class="map-task-popup"><strong>${item.destacada ? '★ ' : ''}${escapeHtmlLocal(title)}</strong><br>$${escapeHtmlLocal(String(price))} · ${escapeHtmlLocal(String(distance))} km${!authenticated ? '<br><small>Ubicación aproximada</small>' : ''}<button type="button" class="btn btn-primary btn-sm btn-block mt-sm" data-map-action>${actionLabel}</button></div>`
             );
+            attachPopupAction(markerItem, item, authenticated, mode);
             taskMarkers.push(markerItem);
         });
         if (taskMarkers.length) {
@@ -182,8 +242,4 @@ export function initMap() {
             mountMapInActivePanel(); map.invalidateSize(); refreshMapTasks();
         }, 0);
     });
-}
-
-function escapeHtmlLocal(str) {
-    const div = document.createElement('div'); div.textContent = str ?? ''; return div.innerHTML;
 }
