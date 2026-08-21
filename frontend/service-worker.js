@@ -1,7 +1,10 @@
-// v20: fix — un click accidental fuera de cualquier formulario modal
-// (crear anuncio, tarea, reseña, etc.) descartaba todo sin avisar.
+// v21: fix — el panel "ServiCuba activo" (saludo, estado, actividad)
+// existía en una versión anterior de app.js pero se perdió al migrar a
+// los módulos dashboard-*.js: el contenedor .dashboard-live nunca se
+// montaba en el HTML, así que ensureKpiGrid/renderWorkspaceState no
+// tenían dónde pintar. Restaurado como tarjeta de marca (dark card).
 // Nunca devolvemos undefined desde un fetch handler.
-const CACHE_VERSION = 'v20';
+const CACHE_VERSION = 'v21';
 const CACHE_NAME = `servicuba-${CACHE_VERSION}`;
 
 const CORE_URLS = [

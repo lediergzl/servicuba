@@ -63,11 +63,25 @@ function ensureKpiGrid(shell) {
     return grid;
 }
 
+function greetingWord() {
+    const hour = new Date().getHours();
+    if (hour < 12) return 'Buenos días';
+    if (hour < 19) return 'Buenas tardes';
+    return 'Buenas noches';
+}
+
 function renderWorkspaceState(state) {
     latestState = state;
     const mode = isClienteMode() ? 'cliente' : 'trabajador';
     const data = mode === 'cliente' ? (state.cliente || {}) : (state.trabajador || {});
     const global = state.global || {};
+
+    // Saludo con el nombre real del usuario — /dashboard/state ya lo trae
+    // en state.user.nombre, así que no hace falta una llamada aparte.
+    const firstName = (state.user?.nombre || '').trim().split(/\s+/)[0] || 'de nuevo';
+    document.querySelectorAll('.dashboard-live__greeting').forEach(el => {
+        el.textContent = `${greetingWord()}, ${firstName}`;
+    });
     const shell = document.querySelector(`#${mode === 'cliente' ? 'dashboardCliente' : 'dashboardTrabajador'} .dashboard-live`);
     if (!shell) return;
     const grid = ensureKpiGrid(shell);
@@ -195,6 +209,11 @@ export function initDashboardLiveSync() {
     initialized = true;
     document.addEventListener('visibilitychange', handleVisibility);
     document.getElementById('modoSwitch')?.addEventListener('click', handleModeChange);
+    // Delegado porque el botón vive dentro de dos vistas (cliente y
+    // trabajador) que se muestran/ocultan, nunca se destruyen.
+    document.addEventListener('click', event => {
+        if (event.target.closest('.dashboard-live__refresh')) syncDashboardData().catch(() => {});
+    });
     const root = document.getElementById('views') || document.body;
     const observer = new MutationObserver(() => {
         if (isDashboardVisible() && localStorage.getItem('token')) {

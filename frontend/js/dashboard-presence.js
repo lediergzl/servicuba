@@ -23,6 +23,15 @@ function injectStyles() {
         .dashboard-presence__button:hover { opacity:1; }
         .dashboard-presence__button:disabled { opacity:.45; cursor:wait; }
         @media (max-width:640px) { .dashboard-presence { grid-template-columns:1fr; } }
+        /* dashboard-presence.js hace shell.prepend(panel) dentro de
+           .dashboard-live, que ahora es una tarjeta oscura — sin esto el
+           texto quedaba oscuro sobre fondo oscuro, ilegible. */
+        .dashboard-live .dashboard-presence { margin:0 0 14px; }
+        .dashboard-live .dashboard-presence__item { border-color:rgba(255,255,255,.16); background:rgba(255,255,255,.06); }
+        .dashboard-live .dashboard-presence__copy strong { color:#fff; }
+        .dashboard-live .dashboard-presence__copy span { color:rgba(255,255,255,.6); opacity:1; }
+        .dashboard-live .dashboard-presence__button { color:var(--accent,#F2B705); opacity:1; }
+        .dashboard-live .dashboard-presence__button:hover { color:#fff; }
     `;
     document.head.appendChild(style);
 }
