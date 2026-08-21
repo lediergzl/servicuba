@@ -11,6 +11,9 @@ function injectStyles() {
     style.id = STYLE_ID;
     style.textContent = `
         .dashboard-presence { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:.7rem; margin:0 0 1rem; }
+        /* Si sólo queda un pendiente (el otro ya está resuelto), que ocupe
+           todo el ancho en vez de dejar una columna vacía a su lado. */
+        .dashboard-presence:has(> :only-child) { grid-template-columns:1fr; }
         .dashboard-presence__item { display:flex; align-items:center; justify-content:space-between; gap:.75rem; padding:.8rem .9rem; border:1px solid rgba(127,127,127,.14); border-radius:14px; background:rgba(127,127,127,.045); }
         .dashboard-presence__main { min-width:0; display:flex; align-items:center; gap:.65rem; }
         .dashboard-presence__dot { width:9px; height:9px; flex:0 0 9px; border-radius:50%; background:#8b8f98; box-shadow:0 0 0 4px rgba(139,143,152,.12); }
@@ -58,33 +61,38 @@ function locationState() {
     return { live:true, label:`${source} · ${accuracy}`, action:'location', actionLabel:'Actualizar' };
 }
 
+// Antes este panel se mostraba SIEMPRE, incluso con ubicación y
+// notificaciones ya activas — un usuario con la cuenta perfectamente
+// configurada seguía viendo dos casillas "todo bien" ocupando espacio
+// arriba de lo que realmente importa (sus tareas). Ahora sólo aparece
+// cuando hay algo pendiente por resolver; si todo está en orden, se
+// oculta por completo.
 function renderPresence(shell) {
+    const loc = { key: 'location', title: 'Tu ubicación', ...locationState() };
+    const push = { key: 'push', title: 'Notificaciones', ...notificationState() };
+    const pending = [loc, push].filter(item => !item.live && item.action);
+
     let panel = shell.querySelector('.dashboard-presence');
+    if (!pending.length) {
+        panel?.remove();
+        return;
+    }
     if (!panel) {
         panel = document.createElement('section');
         panel.className = 'dashboard-presence';
-        panel.setAttribute('aria-label', 'Estado en tiempo real');
+        panel.setAttribute('aria-label', 'Pendientes de tu cuenta');
         shell.prepend(panel);
     }
 
-    const loc = locationState();
-    const push = notificationState();
-    panel.innerHTML = `
+    panel.innerHTML = pending.map(item => `
         <div class="dashboard-presence__item">
             <div class="dashboard-presence__main">
-                <span class="dashboard-presence__dot ${loc.live ? 'is-live' : 'is-warn'}"></span>
-                <span class="dashboard-presence__copy"><strong>Tu ubicación</strong><span>${loc.label}</span></span>
+                <span class="dashboard-presence__dot is-warn"></span>
+                <span class="dashboard-presence__copy"><strong>${item.title}</strong><span>${item.label}</span></span>
             </div>
-            ${loc.action ? `<button class="dashboard-presence__button" type="button" data-presence-action="location">${loc.actionLabel}</button>` : ''}
+            <button class="dashboard-presence__button" type="button" data-presence-action="${item.action}">${item.actionLabel}</button>
         </div>
-        <div class="dashboard-presence__item">
-            <div class="dashboard-presence__main">
-                <span class="dashboard-presence__dot ${push.live ? 'is-live' : ''}"></span>
-                <span class="dashboard-presence__copy"><strong>Notificaciones</strong><span>${push.label}</span></span>
-            </div>
-            ${push.action ? `<button class="dashboard-presence__button" type="button" data-presence-action="push">${push.actionLabel}</button>` : ''}
-        </div>
-    `;
+    `).join('');
 }
 
 async function refreshLocation() {
