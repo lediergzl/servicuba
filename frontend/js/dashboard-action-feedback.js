@@ -1,5 +1,6 @@
 import { syncDashboardData } from './dashboard-live-sync.js';
 import { apiFetch } from './core.js';
+import { initClientApplications, refreshClientApplications } from './client-applications.js';
 
 const ACTION_WORDS = /postular|solicitar|aceptar|rechazar|cancelar|completar|confirmar|publicar|editar|eliminar|guardar/i;
 let lastActionAt = 0;
@@ -8,7 +9,10 @@ let planCache = { value: null, at: 0 };
 
 function scheduleRefresh() {
     window.clearTimeout(refreshTimer);
-    refreshTimer = window.setTimeout(() => syncDashboardData().catch(() => {}), 650);
+    refreshTimer = window.setTimeout(() => {
+        syncDashboardData().catch(() => {});
+        refreshClientApplications().catch(() => {});
+    }, 650);
 }
 function actionLabel(target) { return (target?.textContent || target?.getAttribute('aria-label') || target?.getAttribute('title') || '').trim(); }
 
@@ -72,6 +76,7 @@ function handleSubmit(event) {
 
 document.addEventListener('click', handleClick, true);
 document.addEventListener('submit', handleSubmit, true);
-document.addEventListener('servicuba:data-refreshed', () => { document.querySelectorAll('.is-action-pending').forEach(el => { el.classList.remove('is-action-pending'); el.removeAttribute('aria-busy'); }); refreshPlanUi(); });
+document.addEventListener('servicuba:data-refreshed', () => { document.querySelectorAll('.is-action-pending').forEach(el => { el.classList.remove('is-action-pending'); el.removeAttribute('aria-busy'); }); refreshPlanUi(); refreshClientApplications().catch(() => {}); });
 new MutationObserver(refreshPlanUi).observe(document.body, { subtree: true, attributes: true, attributeFilter: ['class'] });
+initClientApplications();
 refreshPlanUi();
