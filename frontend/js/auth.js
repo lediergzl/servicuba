@@ -37,6 +37,69 @@ function validateRegistration(data, esTrabajador) {
     return null;
 }
 
+async function openEmailVerification(email, { allowResend = true } = {}) {
+    const result = await showFormModal({
+        title: 'Verifica tu correo',
+        confirmLabel: 'Verificar cuenta',
+        fields: [
+            {
+                name: 'codigo',
+                label: `Introduce el código de 6 dígitos enviado a ${email}`,
+                type: 'text',
+                required: true,
+                placeholder: '123456',
+                autocomplete: 'one-time-code',
+                inputmode: 'numeric',
+                pattern: '[0-9]{6}'
+            }
+        ]
+    });
+
+    if (result === null) {
+        notify('Tu cuenta fue creada. Puedes verificar el correo más tarde.', 'info');
+        return false;
+    }
+
+    const codigo = String(result.codigo || '').trim();
+    if (!/^\d{6}$/.test(codigo)) {
+        notify('El código debe tener exactamente 6 dígitos.', 'error');
+        return openEmailVerification(email, { allowResend });
+    }
+
+    try {
+        await apiFetch('/auth/verify-email', {
+            method: 'POST',
+            body: JSON.stringify({ email, codigo })
+        });
+        notify('¡Correo verificado correctamente! Ya puedes iniciar sesión.', 'success');
+        return true;
+    } catch (err) {
+        const message = err.message || 'No se pudo verificar el código.';
+        if (allowResend && /expir|código incorrecto|no hay un código/i.test(message)) {
+            const resend = await showFormModal({
+                title: 'Código no válido',
+                confirmLabel: 'Enviar otro código',
+                fields: []
+            });
+            if (resend !== null) {
+                try {
+                    await apiFetch('/auth/resend-verification', {
+                        method: 'POST',
+                        body: JSON.stringify({ email })
+                    });
+                    notify('Enviamos un nuevo código a tu correo.', 'success');
+                    return openEmailVerification(email, { allowResend: false });
+                } catch (resendErr) {
+                    notify(resendErr.message || 'No se pudo reenviar el código.', 'error');
+                }
+            }
+        } else {
+            notify(`Error: ${message}`, 'error');
+        }
+        return false;
+    }
+}
+
 function ensureAuthNavigation() {
     const addBackLink = (viewId, text) => {
         const view = document.getElementById(viewId);
@@ -90,6 +153,7 @@ export function initAuth() {
         try {
             await apiFetch('/auth/register', { method: 'POST', body: JSON.stringify(data) });
             notify('Cuenta creada. Revisa tu correo: te enviamos un código de verificación.', 'success');
+            await openEmailVerification(data.email);
             showLogin();
         } catch (err) { notify(err.message || 'No se pudo crear la cuenta.', 'error'); }
         finally { if (submitBtn) { submitBtn.disabled = false; submitBtn.textContent = 'Registrarse'; } }
