@@ -12,6 +12,9 @@ import {
 import { openChatForTask } from './chat.js';
 import { requestFeatureTask, loadAdBanner } from './monetization.js';
 
+// Estado compartido de postulaciones/solicitudes ya realizadas.
+const appliedTaskIds = new Set();
+
 // Evita que dos cargas de "cercanas" (tareas u ofertas) se pisen entre sí.
 let nearbyTasksAbortController = null;
 let nearbyOfertasAbortController = null;
