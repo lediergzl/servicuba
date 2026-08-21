@@ -11,6 +11,8 @@ oauth2_scheme_optional = OAuth2PasswordBearer(tokenUrl="/api/auth/login", auto_e
 
 
 def _token_from_request(request: Request, header_token: str | None) -> str | None:
+    # La cookie HttpOnly es la fuente principal. El header Bearer se mantiene
+    # únicamente para clientes API externos; el frontend web no depende de él.
     return request.cookies.get("servicuba_access") or header_token
 
 
@@ -38,6 +40,12 @@ def _user_from_token(token: str | None, db: Session) -> User:
         raise HTTPException(status_code=404, detail="Usuario no encontrado")
     if getattr(user, "suspendido", False):
         raise HTTPException(status_code=403, detail="Cuenta suspendida")
+
+    # Un JWT con una versión anterior fue revocado en el servidor. Esto permite
+    # invalidar inmediatamente tokens que todavía no han expirado.
+    token_version = payload.get("tv")
+    if token_version is None or int(token_version) != int(user.token_version or 1):
+        raise HTTPException(status_code=401, detail="Sesión revocada")
     return user
 
 
