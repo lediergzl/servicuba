@@ -1,0 +1,38 @@
+name: Fix applied task state
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  fix:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Add missing appliedTaskIds state
+        shell: python
+        run: |
+          from pathlib import Path
+          p = Path('frontend/js/tasks.js')
+          text = p.read_text(encoding='utf-8')
+          marker = '// Evita que dos cargas de "cercanas" (tareas u ofertas) se pisen entre sí.\n'
+          if 'const appliedTaskIds = new Set();' not in text:
+              if marker not in text:
+                  raise SystemExit('No se encontró el punto seguro de inserción en tasks.js')
+              text = text.replace(marker, '// Estado compartido de postulaciones/solicitudes ya realizadas.\nconst appliedTaskIds = new Set();\n\n' + marker, 1)
+              p.write_text(text, encoding='utf-8')
+      - name: Commit fix and remove temporary workflow
+        shell: bash
+        run: |
+          rm -f .github/workflows/fix-applied-task-ids.yml
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add frontend/js/tasks.js .github/workflows/fix-applied-task-ids.yml
+          if git diff --cached --quiet; then
+            echo 'No changes needed'
+            exit 0
+          fi
+          git commit -m 'fix(tasks): define appliedTaskIds state'
+          git push
