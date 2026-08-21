@@ -47,6 +47,12 @@ function statusLabel(status) {
     return labels[String(status || '').toLowerCase()] || String(status || 'Actualización');
 }
 
+// Antes este grid tenía 4 tarjetas (Activas / En espera / Completadas /
+// Mensajes) — "Completadas" es historial (no urge verlo acá) y "Mensajes"
+// ya se muestra en el badge de la barra inferior y en el bloque de
+// "Estado" (dashboardStat3, más abajo). Repetirlo una tercera vez sólo
+// sumaba ruido visual. Se deja únicamente lo que realmente pide atención
+// del usuario ahora mismo, en una sola fila.
 function ensureKpiGrid(shell) {
     let grid = shell.querySelector('.dashboard-live__kpis');
     if (grid) return grid;
@@ -55,8 +61,6 @@ function ensureKpiGrid(shell) {
     grid.innerHTML = `
         <article class="dashboard-live__kpi"><span>Activas</span><strong data-dashboard-kpi="primario">0</strong><small data-dashboard-kpi-hint="primario">en tu espacio</small></article>
         <article class="dashboard-live__kpi"><span>En espera</span><strong data-dashboard-kpi="secundario">0</strong><small data-dashboard-kpi-hint="secundario">pendientes</small></article>
-        <article class="dashboard-live__kpi"><span>Completadas</span><strong data-dashboard-kpi="completadas">0</strong><small>historial</small></article>
-        <article class="dashboard-live__kpi"><span>Mensajes</span><strong data-dashboard-kpi="mensajes_no_leidos">0</strong><small>sin leer</small></article>
     `;
     const activity = shell.querySelector('#dashboardLiveActivity');
     shell.insertBefore(grid, activity || null);
@@ -96,7 +100,6 @@ function renderWorkspaceState(state) {
         };
         grid.querySelector('[data-dashboard-kpi="primario"]')?.closest('article')?.querySelector('span').replaceChildren('Tareas activas');
         grid.querySelector('[data-dashboard-kpi="secundario"]')?.closest('article')?.querySelector('span').replaceChildren('Solicitudes');
-        grid.querySelector('[data-dashboard-kpi="completadas"]')?.closest('article')?.querySelector('span').replaceChildren('Completadas');
         grid.querySelector('[data-dashboard-kpi-hint="primario"]')?.replaceChildren('que requieren atención');
         grid.querySelector('[data-dashboard-kpi-hint="secundario"]')?.replaceChildren(cards.secundario ? 'esperando respuesta' : 'ninguna pendiente');
     } else {
@@ -108,11 +111,13 @@ function renderWorkspaceState(state) {
         };
         grid.querySelector('[data-dashboard-kpi="primario"]')?.closest('article')?.querySelector('span').replaceChildren('Trabajos aceptados');
         grid.querySelector('[data-dashboard-kpi="secundario"]')?.closest('article')?.querySelector('span').replaceChildren('Postulaciones');
-        grid.querySelector('[data-dashboard-kpi="completadas"]')?.closest('article')?.querySelector('span').replaceChildren('Servicios activos');
         grid.querySelector('[data-dashboard-kpi-hint="primario"]')?.replaceChildren(cards.primario ? 'requieren seguimiento' : 'sin trabajos activos');
         grid.querySelector('[data-dashboard-kpi-hint="secundario"]')?.replaceChildren(cards.secundario ? 'pendientes de respuesta' : 'ninguna pendiente');
     }
 
+    // Sólo primario/secundario tienen tarjeta visible en el grid (ver
+    // ensureKpiGrid); completadas/mensajes_no_leidos siguen calculándose
+    // arriba porque otros bloques (contexto, estado) los usan igual.
     Object.entries(cards).forEach(([key, value]) => {
         const el = grid.querySelector(`[data-dashboard-kpi="${key}"]`);
         if (el) el.textContent = String(value);
@@ -131,7 +136,11 @@ function renderWorkspaceState(state) {
 
     const activity = shell.querySelector('#dashboardLiveActivity');
     if (activity) {
-        const rows = Array.isArray(state.activity) ? state.activity.slice(0, 5) : [];
+        // Antes se mostraban hasta 5 filas de actividad — 3 alcanza para
+        // dar contexto reciente sin que la tarjeta se vuelva un historial
+        // completo que compite en espacio con "Tareas cercanas"/"Mis
+        // tareas", que es el contenido que el usuario vino a ver.
+        const rows = Array.isArray(state.activity) ? state.activity.slice(0, 3) : [];
         activity.innerHTML = rows.length ? rows.map(item => `
             <div class="dashboard-live__activity-item">
                 <div class="dashboard-live__activity-icon">●</div>
