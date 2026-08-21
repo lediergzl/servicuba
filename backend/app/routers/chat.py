@@ -16,9 +16,6 @@ from ..utils.security import decode_token
 
 router = APIRouter()
 
-# A conversation remains readable after completion, but sending is only
-# allowed while the service relationship is active.  CONFIRMADA and
-# CANCELADA are terminal states for chat writes.
 CHAT_WRITE_STATES = {
     TaskStatus.ASIGNADA,
     TaskStatus.EN_PROCESO,
@@ -27,7 +24,6 @@ CHAT_WRITE_STATES = {
 
 
 def _task_participant_ids(db: Session, task: Task) -> set:
-    """cliente + trabajador(es) with an accepted application for the task."""
     worker_ids = {
         row.worker_id
         for row in db.query(Application.worker_id)
@@ -48,105 +44,48 @@ def _ensure_participant(db: Session, task_id: UUID, user: User) -> Task:
     return task
 
 
-def _ensure_chat_write_allowed(task: Task) -> None:
-    if task.estado not in CHAT_WRITE_STATES:
-        raise HTTPException(
-            status_code=409,
-            detail="El chat está cerrado porque el servicio ya terminó o fue cancelado",
-        )
-
-
 @router.get("/conversations")
-def get_conversations(
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-):
-    """Lista las tareas donde el usuario tiene un chat activo o histórico."""
-    as_client_ids = {
-        row.id for row in db.query(Task.id).filter(
-            Task.cliente_id == current_user.id,
-            Task.estado.in_([
-                TaskStatus.ASIGNADA,
-                TaskStatus.EN_PROCESO,
-                TaskStatus.COMPLETADA,
-                TaskStatus.CONFIRMADA,
-            ]),
-        ).all()
-    }
-    as_worker_ids = {
-        row.task_id for row in db.query(Application.task_id).filter(
-            Application.worker_id == current_user.id,
-            Application.estado == AppStatus.ACEPTADA,
-        ).all()
-    }
+def get_conversations(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    as_client_ids = {row.id for row in db.query(Task.id).filter(Task.cliente_id == current_user.id, Task.estado.in_([TaskStatus.ASIGNADA, TaskStatus.EN_PROCESO, TaskStatus.COMPLETADA, TaskStatus.CONFIRMADA])).all()}
+    as_worker_ids = {row.task_id for row in db.query(Application.task_id).filter(Application.worker_id == current_user.id, Application.estado == AppStatus.ACEPTADA).all()}
     task_ids = as_client_ids | as_worker_ids
     if not task_ids:
         return []
-
     tasks = db.query(Task).filter(Task.id.in_(task_ids)).all()
     result = []
     for task in tasks:
         other_id = None
         if task.cliente_id == current_user.id:
-            worker_app = db.query(Application).filter(
-                Application.task_id == task.id, Application.estado == AppStatus.ACEPTADA
-            ).first()
+            worker_app = db.query(Application).filter(Application.task_id == task.id, Application.estado == AppStatus.ACEPTADA).first()
             other_id = worker_app.worker_id if worker_app else None
         else:
             other_id = task.cliente_id
         other_user = db.query(User).filter(User.id == other_id).first() if other_id else None
-
-        last_msg = (
-            db.query(Message)
-            .filter(Message.task_id == task.id)
-            .order_by(Message.created_at.desc())
-            .first()
-        )
-        unread = (
-            db.query(Message)
-            .filter(Message.task_id == task.id, Message.sender_id != current_user.id, Message.leido == False)  # noqa: E712
-            .count()
-        )
-        result.append({
-            "task_id": str(task.id),
-            "titulo": task.titulo,
-            "estado": task.estado.value,
-            "otro_participante": other_user.nombre if other_user else "—",
-            "ultimo_mensaje": last_msg.contenido if last_msg else None,
-            "ultimo_mensaje_fecha": last_msg.created_at.isoformat() if last_msg else None,
-            "no_leidos": unread,
-            "puede_enviar": task.estado in CHAT_WRITE_STATES and not getattr(current_user, "suspendido", False),
-        })
+        last_msg = db.query(Message).filter(Message.task_id == task.id).order_by(Message.created_at.desc()).first()
+        unread = db.query(Message).filter(Message.task_id == task.id, Message.sender_id != current_user.id, Message.leido == False).count()  # noqa: E712
+        result.append({"task_id": str(task.id), "titulo": task.titulo, "estado": task.estado.value, "otro_participante": other_user.nombre if other_user else "—", "ultimo_mensaje": last_msg.contenido if last_msg else None, "ultimo_mensaje_fecha": last_msg.created_at.isoformat() if last_msg else None, "no_leidos": unread, "puede_enviar": task.estado in CHAT_WRITE_STATES and not getattr(current_user, "suspendido", False)})
     result.sort(key=lambda c: c["ultimo_mensaje_fecha"] or "", reverse=True)
     return result
 
 
 @router.get("/{task_id}/messages", response_model=list[MessageResponse])
-def get_messages(
-    task_id: UUID,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-):
+def get_messages(task_id: UUID, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     _ensure_participant(db, task_id, current_user)
-    messages = (
-        db.query(Message)
-        .filter(Message.task_id == task_id)
-        .order_by(Message.created_at.asc())
-        .all()
-    )
+    messages = db.query(Message).filter(Message.task_id == task_id).order_by(Message.created_at.asc()).all()
     changed = False
     for m in messages:
         if m.sender_id != current_user.id and not m.leido:
-            m.leido = True
-            changed = True
-    if changed:
-        db.commit()
+            m.leido = True; changed = True
+    if changed: db.commit()
     return messages
 
 
 @router.websocket("/ws/{task_id}")
 async def chat_websocket(websocket: WebSocket, task_id: UUID):
-    token = websocket.query_params.get("token")
+    # La sesión principal usa cookie HttpOnly. Los navegadores incluyen esa
+    # cookie automáticamente en el handshake WebSocket same-origin. Se mantiene
+    # el query token como compatibilidad temporal con clientes antiguos.
+    token = websocket.cookies.get("servicuba_access") or websocket.query_params.get("token")
     payload = decode_token(token) if token else None
     if not payload:
         await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
@@ -156,69 +95,29 @@ async def chat_websocket(websocket: WebSocket, task_id: UUID):
     try:
         user = db.query(User).filter(User.id == payload.get("sub")).first()
         if not user or getattr(user, "suspendido", False):
-            await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
-            return
+            await websocket.close(code=status.WS_1008_POLICY_VIOLATION); return
         task = db.query(Task).filter(Task.id == task_id).first()
         if not task or user.id not in _task_participant_ids(db, task):
-            await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
-            return
-
+            await websocket.close(code=status.WS_1008_POLICY_VIOLATION); return
         await manager.connect(task_id, user.id, websocket)
         try:
             while True:
                 data = await websocket.receive_json()
-
-                # Re-read the task on every write. This closes an important
-                # TOCTOU gap: a websocket may remain open while another
-                # request changes the task to CONFIRMADA/CANCELADA.
                 task = db.query(Task).filter(Task.id == task_id).first()
-                if not task:
-                    await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
-                    break
-                if getattr(user, "suspendido", False):
-                    await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
-                    break
+                if not task or getattr(user, "suspendido", False) or user.id not in _task_participant_ids(db, task):
+                    await websocket.close(code=status.WS_1008_POLICY_VIOLATION); break
                 if task.estado not in CHAT_WRITE_STATES:
-                    await websocket.send_json({
-                        "error": "chat_closed",
-                        "detail": "El chat está cerrado porque el servicio ya terminó o fue cancelado",
-                    })
-                    await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
-                    break
-                if user.id not in _task_participant_ids(db, task):
-                    await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
-                    break
-
+                    await websocket.send_json({"error": "chat_closed", "detail": "El chat está cerrado porque el servicio ya terminó o fue cancelado"})
+                    await websocket.close(code=status.WS_1008_POLICY_VIOLATION); break
                 contenido = (data.get("contenido") or "").strip()
-                if not contenido:
-                    continue
-
+                if not contenido: continue
                 msg = Message(task_id=task_id, sender_id=user.id, contenido=contenido[:2000])
-                db.add(msg)
-                db.commit()
-                db.refresh(msg)
-
-                payload_out = {
-                    "id": str(msg.id),
-                    "task_id": str(msg.task_id),
-                    "sender_id": str(msg.sender_id),
-                    "contenido": msg.contenido,
-                    "leido": msg.leido,
-                    "created_at": msg.created_at.isoformat(),
-                }
+                db.add(msg); db.commit(); db.refresh(msg)
+                payload_out = {"id": str(msg.id), "task_id": str(msg.task_id), "sender_id": str(msg.sender_id), "contenido": msg.contenido, "leido": msg.leido, "created_at": msg.created_at.isoformat()}
                 await manager.broadcast(task_id, payload_out)
-
                 for participant_id in _task_participant_ids(db, task):
-                    if participant_id == user.id:
-                        continue
-                    if not manager.is_user_connected(task_id, participant_id):
-                        send_push_to_user(
-                            db,
-                            participant_id,
-                            title=f"Nuevo mensaje de {user.nombre}",
-                            body=contenido[:120],
-                            url=f"/?task={task_id}&view=chat",
-                        )
+                    if participant_id != user.id and not manager.is_user_connected(task_id, participant_id):
+                        send_push_to_user(db, participant_id, title=f"Nuevo mensaje de {user.nombre}", body=contenido[:120], url=f"/?task={task_id}&view=chat")
         except WebSocketDisconnect:
             pass
         finally:
