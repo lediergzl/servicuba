@@ -153,17 +153,24 @@ def login(user: UserLogin, response: Response, db: Session = Depends(get_db)):
         _login_failure(db_user, db); raise HTTPException(status_code=401, detail="Credenciales inválidas")
     if db_user.suspendido: raise HTTPException(status_code=403, detail="Cuenta no disponible")
     _clear_login_failures(db_user, db)
-    access_token = create_access_token(data={"sub": str(db_user.id)}, expires_delta=timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES))
+    access_token = create_access_token(
+        data={"sub": str(db_user.id), "tv": int(db_user.token_version or 1)},
+        expires_delta=timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES),
+    )
     csrf = secrets.token_urlsafe(32)
     response.set_cookie(_COOKIE_NAME, access_token, httponly=True, secure=True, samesite="lax", max_age=settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60, path="/")
     response.set_cookie(_CSRF_COOKIE, csrf, httponly=False, secure=True, samesite="lax", max_age=settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60, path="/")
-    # Legacy clients can still receive the token during the migration; the new
-    # frontend never stores it in localStorage and authenticates with the cookie.
+    # Compatibilidad temporal para clientes API: el frontend web debe usar la
+    # cookie HttpOnly y no persistir el JWT en localStorage.
     return {"access_token": access_token, "token_type": "bearer"}
 
 
 @router.post("/logout")
-def logout(response: Response):
+def logout(response: Response, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    # Revocación real: cualquier JWT emitido con la versión anterior deja de
+    # ser válido inmediatamente, incluso si fue copiado o aún no expiró.
+    current_user.token_version = int(current_user.token_version or 1) + 1
+    db.commit()
     response.delete_cookie(_COOKIE_NAME, path="/")
     response.delete_cookie(_CSRF_COOKIE, path="/")
     return {"message": "Sesión cerrada"}
