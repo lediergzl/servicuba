@@ -16,6 +16,18 @@ import { requestFeatureTask, loadAdBanner } from './monetization.js';
 let nearbyTasksAbortController = null;
 let nearbyOfertasAbortController = null;
 
+// Firma de los filtros (radio+categoría) de la última carga de "cercanas"
+// que sigue en curso. dashboard-live-sync.js dispara un refresco cada 10s
+// en segundo plano con los MISMOS filtros — antes eso cancelaba la
+// petición anterior y volvía a poner el skeleton en cada ciclo. Si el
+// backend tardaba más de 10s en responder (Render/Neon "en frío", ver
+// nota en render.yaml), el listado nunca llegaba a mostrar resultados:
+// cada refresco lo reiniciaba antes de que el anterior terminara. Ahora,
+// si ya hay una carga en curso con los mismos filtros, se deja terminar
+// en vez de cancelarla.
+let nearbyTasksInFlightParams = null;
+let nearbyOfertasInFlightParams = null;
+
 // Categorías cargadas por loadCategories(); se reutilizan para construir
 // los selectores de "Nueva tarea"/"Publicar servicio" sin volver a
 // pedirlas al backend.
@@ -119,7 +131,12 @@ export async function loadNearbyTasks() {
     }
 
     const container = document.getElementById('listaTareas');
-    if (container) container.innerHTML = renderSkeletonCards(3);
+    // Sólo mostramos el skeleton si todavía no hay tarjetas reales en
+    // pantalla (primera carga). Un refresco de fondo posterior (ver
+    // dashboard-live-sync.js, cada 10s) no debe borrar resultados que ya
+    // se ven bien sólo para volver a mostrar el esqueleto de carga.
+    const hasRealCards = container && container.querySelector('.task-card:not(.skeleton-card)');
+    if (container && !hasRealCards) container.innerHTML = renderSkeletonCards(3);
     await ensureCategoriesLoaded();
 
     try {
@@ -135,7 +152,7 @@ export async function loadNearbyTasks() {
         pos = await getGeolocation();
     } catch (err) {
         notify(geolocationErrorMessage(err), 'error');
-        if (container) container.innerHTML = '<p class="empty-state">No se pudo obtener tu ubicación.</p>';
+        if (container && !hasRealCards) container.innerHTML = '<p class="empty-state">No se pudo obtener tu ubicación.</p>';
         return;
     }
 
@@ -143,6 +160,15 @@ export async function loadNearbyTasks() {
     const lng = pos.coords.longitude;
     const radius = document.getElementById('filtroRadio')?.value || 3;
     const category = document.getElementById('filtroCategoria')?.value || '';
+    const paramsKey = `${radius}:${category}`;
+
+    // Ya hay una carga en curso con los MISMOS filtros — probablemente el
+    // refresco periódico de fondo disparándose de nuevo antes de que la
+    // anterior terminara. No la cancelamos: eso es justo lo que dejaba el
+    // listado pegado en el skeleton para siempre en conexiones lentas.
+    if (nearbyTasksAbortController && nearbyTasksInFlightParams === paramsKey) {
+        return;
+    }
 
     // El banner de anuncios se carga en paralelo, sin bloquear la lista de
     // tareas: un anuncio patrocinado nunca debe hacer esperar el contenido
@@ -153,18 +179,22 @@ export async function loadNearbyTasks() {
     if (category) params.set('category_id', category);
 
     if (nearbyTasksAbortController) nearbyTasksAbortController.abort();
-    nearbyTasksAbortController = new AbortController();
+    const myController = new AbortController();
+    nearbyTasksAbortController = myController;
+    nearbyTasksInFlightParams = paramsKey;
 
     let tasks;
     try {
         tasks = await apiFetch(`/tasks/nearby?${params.toString()}`, {
-            signal: nearbyTasksAbortController.signal
+            signal: myController.signal
         });
     } catch (err) {
         if (err.name === 'AbortError') return;
         notify(`No se pudieron cargar las tareas: ${err.message}`, 'error');
-        if (container) container.innerHTML = '<p class="empty-state">Error al cargar tareas.</p>';
+        if (container && !hasRealCards) container.innerHTML = '<p class="empty-state">Error al cargar tareas.</p>';
         return;
+    } finally {
+        if (nearbyTasksAbortController === myController) nearbyTasksInFlightParams = null;
     }
 
     renderNearbyTasks(tasks);
@@ -245,7 +275,8 @@ export async function loadNearbyOfertas() {
     if (!token) return;
 
     const container = document.getElementById('listaOfertasCercanas');
-    if (container) container.innerHTML = renderSkeletonCards(3);
+    const hasRealCards = container && container.querySelector('.task-card:not(.skeleton-card)');
+    if (container && !hasRealCards) container.innerHTML = renderSkeletonCards(3);
     await ensureCategoriesLoaded();
 
     try {
@@ -260,7 +291,7 @@ export async function loadNearbyOfertas() {
         pos = await getGeolocation();
     } catch (err) {
         notify(geolocationErrorMessage(err), 'error');
-        if (container) container.innerHTML = '<p class="empty-state">No se pudo obtener tu ubicación.</p>';
+        if (container && !hasRealCards) container.innerHTML = '<p class="empty-state">No se pudo obtener tu ubicación.</p>';
         return;
     }
 
@@ -268,6 +299,11 @@ export async function loadNearbyOfertas() {
     const lng = pos.coords.longitude;
     const radius = document.getElementById('filtroRadioOfertas')?.value || 3;
     const category = document.getElementById('filtroCategoriaOfertas')?.value || '';
+    const paramsKey = `${radius}:${category}`;
+
+    if (nearbyOfertasAbortController && nearbyOfertasInFlightParams === paramsKey) {
+        return;
+    }
 
     loadAdBanner('adBannerCliente', category || null).catch(() => {});
 
@@ -275,18 +311,22 @@ export async function loadNearbyOfertas() {
     if (category) params.set('category_id', category);
 
     if (nearbyOfertasAbortController) nearbyOfertasAbortController.abort();
-    nearbyOfertasAbortController = new AbortController();
+    const myController = new AbortController();
+    nearbyOfertasAbortController = myController;
+    nearbyOfertasInFlightParams = paramsKey;
 
     let ofertas;
     try {
         ofertas = await apiFetch(`/tasks/ofertas/nearby?${params.toString()}`, {
-            signal: nearbyOfertasAbortController.signal
+            signal: myController.signal
         });
     } catch (err) {
         if (err.name === 'AbortError') return;
         notify(`No se pudieron cargar las ofertas: ${err.message}`, 'error');
-        if (container) container.innerHTML = '<p class="empty-state">Error al cargar ofertas.</p>';
+        if (container && !hasRealCards) container.innerHTML = '<p class="empty-state">Error al cargar ofertas.</p>';
         return;
+    } finally {
+        if (nearbyOfertasAbortController === myController) nearbyOfertasInFlightParams = null;
     }
 
     renderNearbyOfertas(ofertas);
