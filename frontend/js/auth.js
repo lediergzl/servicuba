@@ -16,13 +16,8 @@ function ensureRegistrationEmailField() {
     if (!form || document.getElementById('regEmail')) return;
     const phone = document.getElementById('regTelefono');
     const input = document.createElement('input');
-    input.type = 'email';
-    input.id = 'regEmail';
-    input.name = 'email';
-    input.className = 'field-input';
-    input.placeholder = 'Correo electrónico';
-    input.autocomplete = 'email';
-    input.required = true;
+    input.type = 'email'; input.id = 'regEmail'; input.name = 'email'; input.className = 'field-input';
+    input.placeholder = 'Correo electrónico'; input.autocomplete = 'email'; input.required = true;
     if (phone?.parentNode === form) phone.insertAdjacentElement('afterend', input);
     else form.insertBefore(input, form.firstChild);
 }
@@ -35,69 +30,6 @@ function validateRegistration(data, esTrabajador) {
     if (!/[A-Za-zÁÉÍÓÚáéíóúÑñ]/.test(data.password) || !/[0-9]/.test(data.password)) return 'La contraseña debe incluir al menos una letra y un número.';
     if (esTrabajador && !data.categoria_id) return 'Selecciona el oficio o categoría que ofreces.';
     return null;
-}
-
-async function openEmailVerification(email, { allowResend = true } = {}) {
-    const result = await showFormModal({
-        title: 'Verifica tu correo',
-        confirmLabel: 'Verificar cuenta',
-        fields: [
-            {
-                name: 'codigo',
-                label: `Introduce el código de 6 dígitos enviado a ${email}`,
-                type: 'text',
-                required: true,
-                placeholder: '123456',
-                autocomplete: 'one-time-code',
-                inputmode: 'numeric',
-                pattern: '[0-9]{6}'
-            }
-        ]
-    });
-
-    if (result === null) {
-        notify('Tu cuenta fue creada. Puedes verificar el correo más tarde.', 'info');
-        return false;
-    }
-
-    const codigo = String(result.codigo || '').trim();
-    if (!/^\d{6}$/.test(codigo)) {
-        notify('El código debe tener exactamente 6 dígitos.', 'error');
-        return openEmailVerification(email, { allowResend });
-    }
-
-    try {
-        await apiFetch('/auth/verify-email', {
-            method: 'POST',
-            body: JSON.stringify({ email, codigo })
-        });
-        notify('¡Correo verificado correctamente! Ya puedes iniciar sesión.', 'success');
-        return true;
-    } catch (err) {
-        const message = err.message || 'No se pudo verificar el código.';
-        if (allowResend && /expir|código incorrecto|no hay un código/i.test(message)) {
-            const resend = await showFormModal({
-                title: 'Código no válido',
-                confirmLabel: 'Enviar otro código',
-                fields: []
-            });
-            if (resend !== null) {
-                try {
-                    await apiFetch('/auth/resend-verification', {
-                        method: 'POST',
-                        body: JSON.stringify({ email })
-                    });
-                    notify('Enviamos un nuevo código a tu correo.', 'success');
-                    return openEmailVerification(email, { allowResend: false });
-                } catch (resendErr) {
-                    notify(resendErr.message || 'No se pudo reenviar el código.', 'error');
-                }
-            }
-        } else {
-            notify(`Error: ${message}`, 'error');
-        }
-        return false;
-    }
 }
 
 function ensureAuthNavigation() {
@@ -117,13 +49,49 @@ function ensureAuthNavigation() {
     });
 }
 
+async function verifyEmailFlow(email) {
+    const normalized = normalizeEmail(email);
+    const step = await showFormModal({
+        title: 'Verifica tu correo', confirmLabel: 'Verificar cuenta',
+        fields: [{ name: 'codigo', label: 'Código de 6 dígitos enviado a tu correo', type: 'text', required: true, placeholder: '123456' }]
+    });
+    if (step === null) return false;
+    const codigo = String(step.codigo || '').trim();
+    if (!/^\d{6}$/.test(codigo)) { notify('El código debe tener 6 dígitos.', 'error'); return false; }
+    try {
+        await apiFetch('/auth/verify-email', { method: 'POST', body: JSON.stringify({ email: normalized, codigo }) });
+        notify('Correo verificado correctamente. Ya puedes iniciar sesión.', 'success');
+        return true;
+    } catch (err) { notify(err.message || 'Código incorrecto o expirado.', 'error'); return false; }
+}
+
+async function resendAndVerify(email) {
+    const normalized = normalizeEmail(email);
+    try {
+        const resp = await apiFetch('/auth/resend-verification', { method: 'POST', body: JSON.stringify({ email: normalized }) });
+        notify(resp.message || 'Nuevo código enviado.', 'info');
+        return verifyEmailFlow(normalized);
+    } catch (err) { notify(err.message || 'No se pudo enviar un nuevo código.', 'error'); return false; }
+}
+
+async function promptPendingVerification() {
+    const data = await showFormModal({ title: 'Verificar correo pendiente', confirmLabel: 'Continuar', fields: [{ name: 'email', label: 'Correo electrónico', type: 'email', required: true, placeholder: 'tu@email.com' }] });
+    if (data === null) return;
+    const email = normalizeEmail(data.email);
+    if (!validEmail(email)) return notify('Escribe un correo electrónico válido.', 'error');
+    const verified = await verifyEmailFlow(email);
+    if (!verified) {
+        const resend = await showFormModal({ title: 'Código no válido o expirado', confirmLabel: 'Enviar nuevo código', fields: [{ name: 'email', label: 'Confirma tu correo', type: 'email', required: true, value: email }] });
+        if (resend !== null) await resendAndVerify(normalizeEmail(resend.email));
+    }
+}
+
 export function initAuth() {
     const registerForm = document.getElementById('registerForm');
     const loginForm = document.getElementById('loginForm');
     const regEsTrabajador = document.getElementById('regEsTrabajador');
     let regLastLat = null, regLastLng = null;
-    ensureAuthNavigation();
-    ensureRegistrationEmailField();
+    ensureAuthNavigation(); ensureRegistrationEmailField();
 
     regEsTrabajador?.addEventListener('change', (e) => {
         const show = e.target.checked;
@@ -153,7 +121,11 @@ export function initAuth() {
         try {
             await apiFetch('/auth/register', { method: 'POST', body: JSON.stringify(data) });
             notify('Cuenta creada. Revisa tu correo: te enviamos un código de verificación.', 'success');
-            await openEmailVerification(data.email);
+            const verified = await verifyEmailFlow(data.email);
+            if (!verified) {
+                const resend = await showFormModal({ title: '¿No recibiste el código?', confirmLabel: 'Enviar nuevo código', fields: [{ name: 'email', label: 'Correo electrónico', type: 'email', required: true, value: data.email }] });
+                if (resend !== null) await resendAndVerify(normalizeEmail(resend.email));
+            }
             showLogin();
         } catch (err) { notify(err.message || 'No se pudo crear la cuenta.', 'error'); }
         finally { if (submitBtn) { submitBtn.disabled = false; submitBtn.textContent = 'Registrarse'; } }
@@ -181,6 +153,7 @@ export function initAuth() {
         finally { if (submitBtn) { submitBtn.disabled = false; submitBtn.textContent = 'Ingresar'; } }
     });
 
+    document.getElementById('verifyPendingBtn')?.addEventListener('click', promptPendingVerification);
     document.getElementById('getGpsBtn')?.addEventListener('click', async () => {
         const btn = document.getElementById('getGpsBtn'); if (!btn) return;
         const originalText = btn.textContent; btn.disabled = true; btn.textContent = 'Obteniendo ubicación…';
@@ -208,10 +181,8 @@ function initForgotPassword() {
         notify(resp.message || 'Revisa tu correo.', 'info');
         const step2 = await showFormModal({ title: 'Nueva contraseña', confirmLabel: 'Restablecer', fields: [{ name: 'codigo', label: `Código de 6 dígitos (válido ${resp.expira_en_minutos} min)`, type: 'text', required: true, placeholder: '123456' }, { name: 'nueva_password', label: 'Nueva contraseña', type: 'password', required: true }] });
         if (step2 === null) return;
-        try {
-            await apiFetch('/auth/reset-password', { method: 'POST', body: JSON.stringify({ email, codigo: step2.codigo.trim(), nueva_password: step2.nueva_password }) });
-            notify('Contraseña actualizada. Ya puedes iniciar sesión.', 'success');
-        } catch (err) { notify(`Error: ${err.message}`, 'error'); }
+        try { await apiFetch('/auth/reset-password', { method: 'POST', body: JSON.stringify({ email, codigo: step2.codigo.trim(), nueva_password: step2.nueva_password }) }); notify('Contraseña actualizada. Ya puedes iniciar sesión.', 'success'); }
+        catch (err) { notify(`Error: ${err.message}`, 'error'); }
     });
 }
 
